@@ -4,16 +4,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.acme.dispatch.support.IntegrationTest;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
 
-@SpringBootTest
-@AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 class DispatchApplicationTests {
 
     @Autowired
@@ -32,6 +29,14 @@ class DispatchApplicationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.application").value("dispatch"))
                 .andExpect(jsonPath("$.businessTimezone").value("Europe/Moscow"))
-                .andExpect(jsonPath("$.serverTime").exists());
+                .andExpect(jsonPath("$.serverTime").value("2026-11-12T09:00:00Z"));
+    }
+
+    @Test
+    void protectedEndpointWithoutSessionReturnsProblemDetails() throws Exception {
+        mockMvc.perform(get("/api/requests"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"))
+                .andExpect(jsonPath("$.status").value(401));
     }
 }

@@ -7,6 +7,8 @@ WORKDIR /workspace
 COPY gradlew settings.gradle.kts build.gradle.kts ./
 COPY gradle gradle
 COPY dispatch/build.gradle.kts dispatch/
+# Every project included in settings.gradle.kts needs its directory, even if it is not built here.
+COPY e2e/build.gradle.kts e2e/
 RUN ./gradlew --no-daemon :dispatch:dependencies > /dev/null
 
 COPY dispatch/src dispatch/src

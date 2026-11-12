@@ -2,7 +2,9 @@
 -include .env
 export
 
-.PHONY: help up down reset logs ps db build test run
+.PHONY: help up down reset logs ps db build test run wait e2e
+
+E2E_BASE_URL ?= http://localhost:$(or $(DISPATCH_PORT),8080)
 
 help: ## Show available commands
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-8s %s\n", $$1, $$2}'
@@ -33,3 +35,10 @@ test: ## Run all tests (needs Docker for Testcontainers)
 
 run: db ## Run dispatch locally against the Docker database
 	./gradlew :dispatch:bootRun
+
+wait: ## Wait until dispatch reports healthy (up to 90 s)
+	@for i in $$(seq 1 45); do curl -sf $(E2E_BASE_URL)/actuator/health >/dev/null && exit 0; sleep 2; done; \
+	echo "dispatch is not healthy at $(E2E_BASE_URL)"; exit 1
+
+e2e: wait ## Run end-to-end tests against the running stack (start it with make up)
+	E2E_BASE_URL=$(E2E_BASE_URL) ./gradlew :e2e:test -Pe2e

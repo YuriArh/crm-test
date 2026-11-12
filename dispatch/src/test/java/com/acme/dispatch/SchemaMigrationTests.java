@@ -2,6 +2,11 @@ package com.acme.dispatch;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static com.acme.dispatch.support.DemoData.NORTH;
+import static com.acme.dispatch.support.DemoData.NORTH_INITIATOR;
+import static com.acme.dispatch.support.DemoData.NORTH_OPERATOR;
+import static com.acme.dispatch.support.DemoData.SOUTH;
+import static com.acme.dispatch.support.DemoData.SOUTH_INITIATOR;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -12,26 +17,19 @@ import java.util.UUID;
 
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
+import com.acme.dispatch.support.IntegrationTest;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Verifies that migrations apply and that the database itself enforces integrity (NF03). */
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 @Transactional
 class SchemaMigrationTests {
-
-    static final UUID NORTH = UUID.fromString("0195f000-0000-7000-8000-000000000001");
-    static final UUID SOUTH = UUID.fromString("0195f000-0000-7000-8000-000000000002");
-    static final UUID NORTH_INITIATOR = UUID.fromString("0195f000-0000-7000-8000-000000000101");
-    static final UUID NORTH_OPERATOR = UUID.fromString("0195f000-0000-7000-8000-000000000102");
-    static final UUID SOUTH_INITIATOR = UUID.fromString("0195f000-0000-7000-8000-000000000201");
 
     static final OffsetDateTime NOW = OffsetDateTime.of(2026, 11, 12, 9, 0, 0, 0, ZoneOffset.UTC);
 

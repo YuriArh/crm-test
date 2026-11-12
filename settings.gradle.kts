@@ -8,4 +8,5 @@ dependencyResolutionManagement {
 }
 
 include("dispatch")
+include("e2e")
 // include("carrier-emulator") — added when the emulator is implemented
