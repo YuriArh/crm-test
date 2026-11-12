@@ -73,7 +73,8 @@ class DispatchApplicationTests {
     void unknownPathHasACode() throws Exception {
         mockMvc.perform(get("/api/nothing-here").with(asUser(users, NORTH_INITIATOR_LOGIN)))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"))
+                .andExpect(jsonPath("$.detail").value("Not found"));
     }
 
     @Test

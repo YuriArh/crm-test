@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /** Turns every error into Problem Details with a machine-readable {@code code}. */
 @RestControllerAdvice
@@ -100,6 +101,14 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         }
         ProblemDetail problem = Problems.of(ErrorCode.VALIDATION_FAILED, ex.getMessage());
         return ResponseEntity.badRequest().headers(headers).body(problem);
+    }
+
+    /** Unknown path: a neutral message instead of Spring's "No static resource …", which leaks internals. */
+    @Override
+    protected ResponseEntity<Object> handleNoResourceFoundException(NoResourceFoundException ex, HttpHeaders headers,
+                                                                    HttpStatusCode status, WebRequest request) {
+        ProblemDetail problem = Problems.of(ErrorCode.NOT_FOUND, "Not found");
+        return ResponseEntity.status(ErrorCode.NOT_FOUND.status()).headers(headers).body(problem);
     }
 
     /**

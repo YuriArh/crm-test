@@ -25,6 +25,17 @@ class HealthE2ETest {
     }
 
     @Test
+    void unknownPathIsANeutralNotFound() {
+        E2eClient client = E2eClient.signedInAs("north.initiator");
+
+        E2eClient.Response response = client.get("/api/nothing-here");
+
+        assertThat(response.status()).isEqualTo(404);
+        assertThat(response.code()).isEqualTo("NOT_FOUND");
+        assertThat(response.body().get("detail").asString()).isEqualTo("Not found");
+    }
+
+    @Test
     void protectedApiRequiresSignIn() {
         E2eClient.Response response = new E2eClient().get("/api/requests");
 
