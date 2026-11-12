@@ -63,6 +63,16 @@ class CreateRequestBodyValidationTest {
     }
 
     @Test
+    void weightErrorsAreReadable() {
+        assertThat(messages(body("Pallets", "1.25", "Main st 1", DEADLINE)))
+                .containsExactly("must have at most one decimal place, e.g. 12.5");
+        assertThat(messages(body("Pallets", "0.0", "Main st 1", DEADLINE)))
+                .containsExactly("must be between 0.1 and 20000 kg");
+        assertThat(messages(body("Pallets", "20000.1", "Main st 1", DEADLINE)))
+                .containsExactly("must be between 0.1 and 20000 kg");
+    }
+
+    @Test
     void trailingZerosDoNotCountAsDecimals() {
         assertThat(validator.validate(body("Pallets", "12.50", "Main st 1", DEADLINE))).isEmpty();
         assertThat(validator.validate(body("Pallets", "20000.00", "Main st 1", DEADLINE))).isEmpty();
@@ -92,6 +102,12 @@ class CreateRequestBodyValidationTest {
 
     private static CreateRequestBody body(String cargo, String weight, String address, LocalDate deadline) {
         return new CreateRequestBody(cargo, new BigDecimal(weight), address, deadline);
+    }
+
+    private static Set<String> messages(CreateRequestBody body) {
+        return validator.validate(body).stream()
+                .map(ConstraintViolation::getMessage)
+                .collect(java.util.stream.Collectors.toSet());
     }
 
     private static Set<String> fields(CreateRequestBody body) {

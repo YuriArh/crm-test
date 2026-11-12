@@ -15,6 +15,16 @@ class HealthE2ETest {
     }
 
     @Test
+    void unsupportedMethodIsProblemDetailsWithACode() {
+        E2eClient client = E2eClient.signedInAs("north.initiator");
+
+        E2eClient.Response response = client.get("/api/auth/login");
+
+        assertThat(response.status()).isEqualTo(405);
+        assertThat(response.code()).isEqualTo("METHOD_NOT_ALLOWED");
+    }
+
+    @Test
     void protectedApiRequiresSignIn() {
         E2eClient.Response response = new E2eClient().get("/api/requests");
 

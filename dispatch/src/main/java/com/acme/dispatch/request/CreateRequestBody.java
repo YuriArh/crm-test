@@ -16,9 +16,15 @@ import jakarta.validation.constraints.Size;
  */
 public record CreateRequestBody(
         @NotBlank @Size(max = 200) String cargoDescription,
-        @NotNull @DecimalMin("0.1") @DecimalMax("20000") @Digits(integer = 5, fraction = 1) BigDecimal weightKg,
+        @NotNull
+        @DecimalMin(value = "0.1", message = WEIGHT_RANGE)
+        @DecimalMax(value = "20000", message = WEIGHT_RANGE)
+        @Digits(integer = 5, fraction = 1, message = "must have at most one decimal place, e.g. 12.5")
+        BigDecimal weightKg,
         @NotBlank @Size(max = 500) String deliveryAddress,
         @NotNull LocalDate deadline) {
+
+    static final String WEIGHT_RANGE = "must be between 0.1 and 20000 kg";
 
     /** Canonical weight before validation, so {@code 12.50} passes the one-decimal check like {@code 12.5}. */
     public CreateRequestBody {

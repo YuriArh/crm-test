@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -101,16 +102,25 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         return ResponseEntity.badRequest().headers(headers).body(problem);
     }
 
-    /** Adds a {@code code} to the Problem Details Spring MVC produces for framework errors (404, 405, …). */
+    /**
+     * Adds a {@code code} to the Problem Details Spring MVC builds for framework errors (404, 405, 415, …).
+     * Done here, not in {@code handleExceptionInternal}: for those errors the body is still {@code null}
+     * there and is only filled in by the superclass. The code is the HTTP status name, e.g.
+     * {@code METHOD_NOT_ALLOWED}.
+     */
     @Override
-    protected ResponseEntity<Object> handleExceptionInternal(Exception ex, Object body, HttpHeaders headers,
-                                                             HttpStatusCode statusCode, WebRequest request) {
+    protected ResponseEntity<Object> createResponseEntity(Object body, HttpHeaders headers, HttpStatusCode statusCode,
+                                                          WebRequest request) {
         if (body instanceof ProblemDetail problem
                 && (problem.getProperties() == null || !problem.getProperties().containsKey(Problems.CODE))) {
-            problem.setProperty(Problems.CODE, statusCode.value() == 404 ? ErrorCode.NOT_FOUND.name()
-                    : "HTTP_" + statusCode.value());
+            problem.setProperty(Problems.CODE, statusCodeName(statusCode));
         }
-        return super.handleExceptionInternal(ex, body, headers, statusCode, request);
+        return super.createResponseEntity(body, headers, statusCode, request);
+    }
+
+    static String statusCodeName(HttpStatusCode statusCode) {
+        HttpStatus status = HttpStatus.resolve(statusCode.value());
+        return status != null ? status.name() : "HTTP_" + statusCode.value();
     }
 
     private static Map<String, Object> fieldError(FieldError error) {

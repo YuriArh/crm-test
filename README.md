@@ -57,7 +57,7 @@ The operator sees only North requests; each initiator sees only their own.
 | `PATCH /api/requests/{id}` | owner / operator | `{version, comment?, assigneeId?}`; an omitted field is kept, `null` clears it; only an operator sets the assignee |
 
 - Every mutating request needs the `X-XSRF-TOKEN` header with the value of the `XSRF-TOKEN` cookie; the token changes after login, so re-read the cookie.
-- Errors are Problem Details (RFC 9457) with a machine-readable `code`: `VALIDATION_FAILED` (with `errors[]` per field), `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_REUSED`, `UNAUTHENTICATED`, `BAD_CREDENTIALS`, `FORBIDDEN`, `NOT_FOUND`, `VERSION_CONFLICT` (with the `current` state), `INVALID_ASSIGNEE`.
+- Errors are Problem Details (RFC 9457) with a machine-readable `code`: `VALIDATION_FAILED` (with `errors[]` per field), `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_REUSED`, `UNAUTHENTICATED`, `BAD_CREDENTIALS`, `FORBIDDEN`, `NOT_FOUND`, `VERSION_CONFLICT` (with the `current` state), `INVALID_ASSIGNEE`. Other HTTP errors carry the status name as the code, e.g. `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`.
 - A repeated create with the same `Idempotency-Key` returns the first response with header `Idempotent-Replayed: true`.
 
 ### Walkthrough with curl
