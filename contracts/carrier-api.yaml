@@ -1,0 +1,557 @@
+openapi: 3.1.0
+info:
+  title: Carrier API (emulator)
+  version: 1.0.0
+  license:
+    name: Proprietary (test assignment)
+    identifier: LicenseRef-Proprietary
+  description: |
+    API of the fictional delivery carrier, implemented by `carrier-emulator` and called by `dispatch`.
+    This file is the only agreement between the two sides: they share no Java classes, each side writes
+    its own DTOs from this contract.
+
+    ## Exchange rules
+
+    **Operation identity.** Every delivery request in `dispatch` has an immutable `operationId` (UUID),
+    created together with the request. All send retries reuse it.
+
+    **Idempotent submit.** `POST /operations` returns `202 Accepted` both for the first submit and for
+    every repeat with the same content; a repeat never executes the operation again (at most one
+    execution per `operationId`). The same `operationId` with different content is rejected with
+    `409 PAYLOAD_MISMATCH`. Content is compared by meaning: strings after trimming surrounding
+    whitespace, weight as a number (`12.5` equals `12.50`).
+
+    **Receipt is not execution.** `202` only confirms that the carrier received the operation.
+    Execution happens later in the background; its outcome appears in the result feed.
+
+    **Result feed.** `GET /results?after=N` returns entries with `feedSeq > N` in ascending order,
+    without gaps. The client stores the last processed `feedSeq` as its cursor. Per operation the feed
+    normally has two entries: `IN_PROGRESS` (`sequence` 1) and the final `SUCCEEDED` or `REJECTED`
+    (`sequence` 2).
+
+    **Applicability of a result** (decided by the receiver):
+    - an entry whose `messageId` was already received is a duplicate and has no effect;
+    - an entry whose `sequence` is not greater than the one already applied for the operation is stale
+      and has no effect;
+    - the same `sequence` with different content is a conflict that needs an operator decision;
+    - a final result (`SUCCEEDED` / `REJECTED`) is never replaced automatically.
+
+    **Reconciliation.** `GET /operations/{operationId}` returns the carrier's actual state of an
+    operation including its latest result with the same `messageId` and `sequence` as in the feed, so a
+    result applied from reconciliation is later recognised as a duplicate in the feed. `404` means the
+    carrier does not know the operation.
+
+    **Unavailability.** While the carrier is unavailable, exchange endpoints answer `503 UNAVAILABLE`;
+    the client retries later.
+
+    **Assumptions.** No authentication: the emulator runs inside the local Docker network. Instants are
+    UTC, prices are in rubles.
+
+    The `admin` endpoints belong to the emulator only (fault modes and execution counters for checks);
+    `dispatch` does not call them.
+servers:
+  - url: http://localhost:8081
+    description: Local emulator
+security: []
+tags:
+  - name: exchange
+    description: Exchange with `dispatch`.
+  - name: admin
+    description: Emulator service endpoints for manual and automated checks; not used by `dispatch`.
+
+paths:
+  /operations:
+    post:
+      tags: [exchange]
+      operationId: submitOperation
+      summary: Submit a delivery operation
+      description: |
+        Accepts the operation for execution. Idempotent by `operationId`: a repeat with the same content
+        returns the same `202` and does not execute the operation again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitOperationRequest'
+            examples:
+              pallets:
+                summary: Ordinary delivery
+                value:
+                  operationId: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f
+                  cargoDescription: Pallets
+                  weightKg: 12.5
+                  deliveryAddress: Main st 1
+                  deadline: '2026-12-01'
+      responses:
+        '202':
+          description: Received (first submit or repeat with the same content).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitOperationResponse'
+              examples:
+                accepted:
+                  value:
+                    operationId: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f
+                    status: ACCEPTED
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '409':
+          description: The `operationId` was already submitted with different content.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                payloadMismatch:
+                  value:
+                    code: PAYLOAD_MISMATCH
+                    message: Operation 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f was already submitted with different content
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
+  /operations/{operationId}:
+    get:
+      tags: [exchange]
+      operationId: getOperation
+      summary: Get the carrier's state of an operation
+      description: Used by `dispatch` for reconciliation.
+      parameters:
+        - $ref: '#/components/parameters/OperationIdPath'
+      responses:
+        '200':
+          description: The operation is known to the carrier.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationState'
+              examples:
+                executed:
+                  summary: Executed, delivered successfully
+                  value:
+                    operationId: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f
+                    state: EXECUTED
+                    receivedAt: '2026-11-12T09:15:02Z'
+                    executedAt: '2026-11-12T09:15:03Z'
+                    result:
+                      messageId: 0195f3a2-8000-7a00-8b00-000000000002
+                      operationId: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f
+                      sequence: 2
+                      status: SUCCEEDED
+                      trackingNumber: TRK-3F1C2B4D
+                      price: 612.50
+                      reason: null
+                      occurredAt: '2026-11-12T09:15:03Z'
+                accepted:
+                  summary: Received, not executed yet
+                  value:
+                    operationId: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f
+                    state: ACCEPTED
+                    receivedAt: '2026-11-12T09:15:02Z'
+                    executedAt: null
+                    result: null
+        '404':
+          description: The carrier does not know this operation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                notFound:
+                  value:
+                    code: OPERATION_NOT_FOUND
+                    message: Operation 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f is not known
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
+  /results:
+    get:
+      tags: [exchange]
+      operationId: getResults
+      summary: Read the result feed
+      description: |
+        Returns feed entries with `feedSeq` greater than `after`, in ascending `feedSeq` order, at most
+        `limit` entries. An empty `items` list means there is nothing new.
+      parameters:
+        - name: after
+          in: query
+          description: Last `feedSeq` the client has processed; `0` reads from the start.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          description: Maximum number of entries in the response.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+      responses:
+        '200':
+          description: A page of the feed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultPage'
+              examples:
+                twoOperations:
+                  value:
+                    items:
+                      - feedSeq: 41
+                        messageId: 0195f3a2-8000-7a00-8b00-000000000001
+                        operationId: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f
+                        sequence: 1
+                        status: IN_PROGRESS
+                        trackingNumber: null
+                        price: null
+                        reason: null
+                        occurredAt: '2026-11-12T09:15:03Z'
+                      - feedSeq: 42
+                        messageId: 0195f3a2-8000-7a00-8b00-000000000002
+                        operationId: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f
+                        sequence: 2
+                        status: SUCCEEDED
+                        trackingNumber: TRK-3F1C2B4D
+                        price: 612.50
+                        reason: null
+                        occurredAt: '2026-11-12T09:15:03Z'
+                      - feedSeq: 43
+                        messageId: 0195f3a2-8000-7a00-8b00-000000000003
+                        operationId: 0195f3a2-9d00-7e20-8c30-4a5b6c7d8e9f
+                        sequence: 1
+                        status: IN_PROGRESS
+                        trackingNumber: null
+                        price: null
+                        reason: null
+                        occurredAt: '2026-11-12T09:15:04Z'
+                      - feedSeq: 44
+                        messageId: 0195f3a2-8000-7a00-8b00-000000000004
+                        operationId: 0195f3a2-9d00-7e20-8c30-4a5b6c7d8e9f
+                        sequence: 2
+                        status: REJECTED
+                        trackingNumber: null
+                        price: null
+                        reason: Превышен допустимый вес
+                        occurredAt: '2026-11-12T09:15:04Z'
+                empty:
+                  summary: Nothing new
+                  value:
+                    items: []
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
+  /admin/faults:
+    get:
+      tags: [admin]
+      operationId: getFaults
+      summary: Get fault modes
+      responses:
+        '200':
+          description: Current fault modes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Faults'
+              examples:
+                allOff:
+                  value: {unavailable: false, loseResponse: false, duplicate: false, delayed: false}
+    put:
+      tags: [admin]
+      operationId: setFaults
+      summary: Set fault modes
+      description: |
+        Switches fault modes on or off. Modes live in memory: after an emulator restart all are off.
+        - `unavailable` — exchange endpoints answer `503`;
+        - `loseResponse` — a submit is received and stored, but the response is delayed beyond the
+          client timeout (default 10 s);
+        - `duplicate` — every result is published to the feed twice with the same `messageId`;
+        - `delayed` — the final result is published after a delay (default 60 s) and the `IN_PROGRESS`
+          entry only after it, so it arrives stale.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Faults'
+            examples:
+              loseResponse:
+                value: {unavailable: false, loseResponse: true, duplicate: false, delayed: false}
+      responses:
+        '200':
+          description: Fault modes after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Faults'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /admin/operations:
+    get:
+      tags: [admin]
+      operationId: listOperations
+      summary: List operations with execution counters
+      description: Lets a check confirm the carrier's actual state independently of `dispatch`.
+      parameters:
+        - name: operationId
+          in: query
+          description: Return only this operation (an empty list if it is not known).
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Operations, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AdminOperation'
+              examples:
+                one:
+                  value:
+                    items:
+                      - operationId: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f
+                        cargoDescription: Pallets
+                        weightKg: 12.5
+                        deliveryAddress: Main st 1
+                        deadline: '2026-12-01'
+                        state: EXECUTED
+                        receivedAt: '2026-11-12T09:15:02Z'
+                        executedAt: '2026-11-12T09:15:03Z'
+                        result:
+                          messageId: 0195f3a2-8000-7a00-8b00-000000000002
+                          operationId: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f
+                          sequence: 2
+                          status: SUCCEEDED
+                          trackingNumber: TRK-3F1C2B4D
+                          price: 612.50
+                          reason: null
+                          occurredAt: '2026-11-12T09:15:03Z'
+                        receivedCount: 3
+                        executionCount: 1
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+
+components:
+  parameters:
+    OperationIdPath:
+      name: operationId
+      in: path
+      required: true
+      description: Business operation identity assigned by `dispatch`.
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    ValidationFailed:
+      description: The request is malformed or violates the schema.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            validationFailed:
+              value:
+                code: VALIDATION_FAILED
+                message: 'weightKg: must be between 0.1 and 20000'
+    Unavailable:
+      description: The carrier is temporarily unavailable; retry later.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            unavailable:
+              value:
+                code: UNAVAILABLE
+                message: Carrier is temporarily unavailable
+
+  schemas:
+    DeliveryContent:
+      type: object
+      description: Immutable content of a delivery operation.
+      required: [cargoDescription, weightKg, deliveryAddress, deadline]
+      properties:
+        cargoDescription:
+          type: string
+          minLength: 1
+          maxLength: 200
+        weightKg:
+          type: number
+          minimum: 0.1
+          maximum: 20000
+          description: Weight in kilograms, at most one decimal place.
+        deliveryAddress:
+          type: string
+          minLength: 1
+          maxLength: 500
+        deadline:
+          type: string
+          format: date
+          description: Last acceptable delivery date (inclusive). Stored by the carrier, not used in its decision.
+
+    SubmitOperationRequest:
+      type: object
+      additionalProperties: false
+      required: [operationId, cargoDescription, weightKg, deliveryAddress, deadline]
+      properties:
+        operationId:
+          type: string
+          format: uuid
+        cargoDescription:
+          $ref: '#/components/schemas/DeliveryContent/properties/cargoDescription'
+        weightKg:
+          $ref: '#/components/schemas/DeliveryContent/properties/weightKg'
+        deliveryAddress:
+          $ref: '#/components/schemas/DeliveryContent/properties/deliveryAddress'
+        deadline:
+          $ref: '#/components/schemas/DeliveryContent/properties/deadline'
+
+    SubmitOperationResponse:
+      type: object
+      required: [operationId, status]
+      properties:
+        operationId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [ACCEPTED]
+          description: Receipt confirmation; not an execution result.
+
+    OperationState:
+      type: object
+      required: [operationId, state, receivedAt, executedAt, result]
+      properties:
+        operationId:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum: [ACCEPTED, EXECUTED]
+          description: '`ACCEPTED` — received, waiting for execution; `EXECUTED` — executed exactly once.'
+        receivedAt:
+          type: string
+          format: date-time
+          description: First receipt.
+        executedAt:
+          type: [string, 'null']
+          format: date-time
+        result:
+          description: Latest result published for the operation, or `null` if none yet.
+          oneOf:
+            - $ref: '#/components/schemas/OperationResult'
+            - type: 'null'
+
+    OperationResult:
+      type: object
+      description: |
+        A result of an operation. `SUCCEEDED` has `trackingNumber` and `price`; `REJECTED` has `reason`;
+        `IN_PROGRESS` has all three `null`.
+      required: [messageId, operationId, sequence, status, trackingNumber, price, reason, occurredAt]
+      properties:
+        messageId:
+          type: string
+          format: uuid
+          description: Unique id of this result message; the same in the feed and in reconciliation.
+        operationId:
+          type: string
+          format: uuid
+        sequence:
+          type: integer
+          minimum: 1
+          description: Order of results within one operation; a greater value is more recent.
+        status:
+          type: string
+          enum: [IN_PROGRESS, SUCCEEDED, REJECTED]
+        trackingNumber:
+          type: [string, 'null']
+          pattern: '^TRK-[0-9A-F]{8}$'
+        price:
+          type: [number, 'null']
+          minimum: 0
+          description: Delivery price in rubles, two decimal places.
+        reason:
+          type: [string, 'null']
+          description: Rejection reason.
+        occurredAt:
+          type: string
+          format: date-time
+
+    ResultEntry:
+      description: A feed entry — an operation result with its position in the feed.
+      allOf:
+        - type: object
+          required: [feedSeq]
+          properties:
+            feedSeq:
+              type: integer
+              format: int64
+              minimum: 1
+              description: Position in the feed; strictly increasing, without gaps.
+        - $ref: '#/components/schemas/OperationResult'
+
+    ResultPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/ResultEntry'
+
+    Faults:
+      type: object
+      additionalProperties: false
+      required: [unavailable, loseResponse, duplicate, delayed]
+      properties:
+        unavailable:
+          type: boolean
+        loseResponse:
+          type: boolean
+        duplicate:
+          type: boolean
+        delayed:
+          type: boolean
+
+    AdminOperation:
+      description: Operation with its content and execution counters.
+      allOf:
+        - $ref: '#/components/schemas/OperationState'
+        - $ref: '#/components/schemas/DeliveryContent'
+        - type: object
+          required: [receivedCount, executionCount]
+          properties:
+            receivedCount:
+              type: integer
+              minimum: 1
+              description: How many times the operation was submitted, including repeats.
+            executionCount:
+              type: integer
+              minimum: 0
+              maximum: 1
+              description: How many times the operation was actually executed; never more than 1.
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [VALIDATION_FAILED, PAYLOAD_MISMATCH, OPERATION_NOT_FOUND, UNAVAILABLE]
+        message:
+          type: string

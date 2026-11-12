@@ -20,6 +20,8 @@
 
 ## 3. Рабочий API (контракт с `dispatch`)
 
+Точный формат — `contracts/carrier-api.yaml`; ниже — суть.
+
 | Запрос | Ответ |
 |---|---|
 | `POST /operations` `{operationId, cargoDescription, weightKg, deliveryAddress, deadline}` | первый раз — `202 {operationId, status: "ACCEPTED"}`; повтор с тем же содержимым — тот же `202`, без нового исполнения; тот же `operationId` с другим содержимым — `409 {code: "PAYLOAD_MISMATCH"}`; неверное тело — `400` |

@@ -2,12 +2,14 @@
 -include .env
 export
 
-.PHONY: help up down reset logs ps db build test run wait e2e
+.PHONY: help up down reset logs ps db build test run wait e2e contracts-lint
+
+REDOCLY_IMAGE := redocly/cli:1.34.3
 
 E2E_BASE_URL ?= http://localhost:$(or $(DISPATCH_PORT),8080)
 
 help: ## Show available commands
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-8s %s\n", $$1, $$2}'
+	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
 
 up: ## Build and start all services in Docker
 	docker compose up -d --build
@@ -42,3 +44,6 @@ wait: ## Wait until dispatch reports healthy (up to 90 s)
 
 e2e: wait ## Run end-to-end tests against the running stack (start it with make up)
 	E2E_BASE_URL=$(E2E_BASE_URL) ./gradlew :e2e:test -Pe2e
+
+contracts-lint: ## Lint the OpenAPI contracts in contracts/ (Redocly CLI in Docker)
+	docker run --rm -v "$(CURDIR)/contracts:/spec" -w /spec $(REDOCLY_IMAGE) lint carrier-api.yaml

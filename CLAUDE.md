@@ -19,7 +19,7 @@ Domain: a cargo delivery request (cargo, weight, address, deadline). Lifecycle: 
   - `config` — `AppProperties`, `Clock`, `IdGenerator` (UUIDv7).
 - `e2e/` — end-to-end tests over real HTTP against the running Docker stack (`E2eClient`: cookie jar, CSRF, JSON). Skipped by `./gradlew build`; run with `make e2e` after `make up`. They create their own data and must pass repeatedly on a non-empty database.
 - `carrier-emulator/` — emulator of the external carrier: separate Spring Boot app (package `com.acme.carrier`) with its **own database** (database `carrier` in the shared PostgreSQL container). Deliberately minimal test stand; design in `docs/carrier-emulator-design.md`. Not implemented yet. When added, include it in `settings.gradle.kts` and `docker-compose.yml`.
-- `contracts/` — OpenAPI contracts (`dispatch-api.yaml` for dispatch↔web, `carrier-api.yaml` for dispatch↔carrier-emulator); the YAML files are not written yet. `dispatch` and `carrier-emulator` must **not share Java classes**: the emulator stands in for an external system, so the contract in `contracts/` is the only agreement between them.
+- `contracts/` — OpenAPI contracts (`dispatch-api.yaml` for dispatch↔web, `carrier-api.yaml` for dispatch↔carrier-emulator); `carrier-api.yaml` is written (also holds the exchange rules and the emulator's `admin` endpoints); `dispatch-api.yaml` is not yet. Lint with `make contracts-lint` after every change in `contracts/`. `dispatch` and `carrier-emulator` must **not share Java classes**: the emulator stands in for an external system, so the contract in `contracts/` is the only agreement between them.
 - `web/` — planned React + TypeScript + Vite client, a separate npm project (not in Gradle). The UI and the API are served from one origin (Vite proxy in dev, nginx in Docker), so session cookies work without CORS.
 
 Gradle multi-project build: the root `build.gradle.kts` configures the Java 25 toolchain, `-parameters`, JUnit Platform, and `user.timezone=UTC` for tests in all subprojects. Plugin versions live in `gradle/libs.versions.toml`; library versions come from the Spring Boot BOM and are not pinned.
@@ -38,7 +38,7 @@ make logs              # follow dispatch logs
 make e2e               # e2e tests against the running stack (waits for health first)
 ```
 
-Verification gate for every change: `./gradlew build` (unit + integration) green, then `make up && make e2e` green.
+Verification gate for every change: `./gradlew build` (unit + integration) green, then `make up && make e2e` green. Changes in `contracts/` also need `make contracts-lint` green.
 
 Single test class / method:
 

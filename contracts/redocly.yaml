@@ -1,0 +1,10 @@
+# Redocly CLI lint config for the contracts (make contracts-lint).
+extends:
+  - recommended
+rules:
+  # The carrier is a local emulator: localhost is its real address.
+  no-server-example.com: off
+  # GET /admin/faults has no input, so it has no client error to describe.
+  operation-4xx-response: off
+  # Examples are part of the contract: a wrong example fails the lint.
+  no-invalid-media-type-examples: error
