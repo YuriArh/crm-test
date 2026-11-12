@@ -20,6 +20,13 @@ public record CreateRequestBody(
         @NotBlank @Size(max = 500) String deliveryAddress,
         @NotNull LocalDate deadline) {
 
+    /** {@code 12.50} is the same weight as {@code 12.5}: drop trailing zeros before the one-decimal check. */
+    public CreateRequestBody {
+        if (weightKg != null) {
+            weightKg = weightKg.stripTrailingZeros();
+        }
+    }
+
     public DeliveryContent toContent() {
         return new DeliveryContent(cargoDescription.strip(), weightKg, deliveryAddress.strip(), deadline);
     }

@@ -10,7 +10,14 @@ Domain: a cargo delivery request (cargo, weight, address, deadline). Lifecycle: 
 
 ## Repository layout and status
 
-- `dispatch/` — the main application: accepts delivery requests, dispatches them to the carrier, tracks delivery and result, reconciles. Spring Boot 4 / Java 25 (package `com.acme.dispatch`). Currently: config, `/api/system/info`, and the stage-1 schema (Flyway V1–V5: services, users, requests, operations, attempts, inbox, feed cursor, idempotency keys, demo users; see `docs/dispatch-design.md` §4). No entities, security or API yet.
+- `dispatch/` — the main application: accepts delivery requests, dispatches them to the carrier, tracks delivery and result, reconciles. Spring Boot 4 / Java 25 (package `com.acme.dispatch`). Stage-1 schema (Flyway V1–V5, see `docs/dispatch-design.md` §4), session sign-in and the requests API (create with `Idempotency-Key`, registry, card, `PATCH` comment/assignee) are implemented; the send worker, feed polling and reconciliation are not yet. Packages under `com.acme.dispatch`:
+  - `auth` — users, services, `CurrentUser` principal, `SecurityConfig` (session cookie, SPA CSRF, 401/403 as Problem Details), login/logout/me, operators list;
+  - `request` — `DeliveryRequest` aggregate, `RequestService` (write side), `RequestQueryService`/`RequestQueryDao` (registry and card SQL), `RequestPermissions` (pure access policy), `OverduePolicy`, request bodies;
+  - `exchange` — `DispatchOperationDao` (operation row = send queue), `DeliveryStatus`, `PayloadHasher`;
+  - `idempotency` — `IdempotencyService` (must run inside the caller's transaction);
+  - `common` — `BusinessCalendar` (only source of "now"/"today"), `SqlTime`; `common/web` — `ErrorCode`, `ApiException`, `ApiExceptionHandler`, `ProblemResponseWriter`, `PageResponse`;
+  - `config` — `AppProperties`, `Clock`, `IdGenerator` (UUIDv7).
+- `e2e/` — end-to-end tests over real HTTP against the running Docker stack (`E2eClient`: cookie jar, CSRF, JSON). Skipped by `./gradlew build`; run with `make e2e` after `make up`. They create their own data and must pass repeatedly on a non-empty database.
 - `carrier-emulator/` — emulator of the external carrier: separate Spring Boot app (package `com.acme.carrier`) with its **own database**. Not implemented yet. When added, include it in `settings.gradle.kts` and `docker-compose.yml`.
 - `contracts/` — OpenAPI contracts (`dispatch-api.yaml` for dispatch↔web, `carrier-api.yaml` for dispatch↔carrier-emulator); the YAML files are not written yet. `dispatch` and `carrier-emulator` must **not share Java classes**: the emulator stands in for an external system, so the contract in `contracts/` is the only agreement between them.
 - `web/` — planned React + TypeScript + Vite client, a separate npm project (not in Gradle). The UI and the API are served from one origin (Vite proxy in dev, nginx in Docker), so session cookies work without CORS.
@@ -28,7 +35,10 @@ make test              # ./gradlew test — needs Docker running (Testcontainers
 make build             # ./gradlew build (with tests)
 make reset             # stop everything and delete the DB volume
 make logs              # follow dispatch logs
+make e2e               # e2e tests against the running stack (waits for health first)
 ```
+
+Verification gate for every change: `./gradlew build` (unit + integration) green, then `make up && make e2e` green.
 
 Single test class / method:
 
@@ -44,7 +54,9 @@ Smoke check: `curl localhost:8080/actuator/health` and `curl localhost:8080/api/
 - **Time:** instants are stored and processed in UTC (the JVM default zone and the Postgres container are UTC). The single business time zone is `app.timezone` / `APP_TIMEZONE` (default `Europe/Moscow`, bound to `AppProperties`), used for deadlines and period boundaries consistently in UI, API and calculations (NF07). Get "now" from the injected `Clock` bean (`TimeConfig`), never `Instant.now()` directly, so tests can use a fixed clock.
 - **Schema:** owned only by Flyway migrations in `dispatch/src/main/resources/db/migration`. No ORM schema validation: integration tests on a real database check that code and schema match.
 - **Data access:** entities via Spring Data JDBC (repositories, `@Version`, paging; no persistence context, lazy loading or implicit updates). The exchange core (queue `FOR UPDATE SKIP LOCKED`, row locks, `INSERT … ON CONFLICT`, conditional status `UPDATE … WHERE status IN (…)`, the registry query) is explicit SQL via `JdbcClient`. Do not use JPA/Hibernate.
-- **Integration tests** use a real PostgreSQL via Testcontainers: `@SpringBootTest` + `@Import(TestcontainersConfiguration.class)`. Keep the image (`postgres:18-alpine`) in sync with `docker-compose.yml`.
+- **Tests — three levels:** unit (plain JUnit, `*Test`), integration (`*Tests`), e2e (`e2e/`, `*E2ETest`).
+  - Every integration test uses exactly `@IntegrationTest` (`support/`): real PostgreSQL via Testcontainers + MockMvc + the test clock, one shared context and container. Keep the image (`postgres:18-alpine`) in sync with `docker-compose.yml`.
+  - Fixtures in `dispatch/src/test/.../support/`: `DemoData` (demo ids/logins), `TestSecurity.asUser(users, login)`, `MutableClock` (reset to `TestClockConfiguration.START` in `@BeforeEach`), `TestRows.deleteRequestData(jdbc)` in `@AfterEach`. Mutating MockMvc calls need `.with(csrf())`.
 - **Resource budget (NF08):** dispatch + postgres + carrier-emulator together get at most 2 CPUs / 4 GiB; the planned split is in the comment at the top of `docker-compose.yml`. Keep compose `deploy.resources.limits` within it.
 
 ## Database migrations (Flyway)

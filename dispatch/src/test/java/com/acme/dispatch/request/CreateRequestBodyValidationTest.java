@@ -63,6 +63,13 @@ class CreateRequestBodyValidationTest {
     }
 
     @Test
+    void trailingZerosDoNotCountAsDecimals() {
+        assertThat(validator.validate(body("Pallets", "12.50", "Main st 1", DEADLINE))).isEmpty();
+        assertThat(validator.validate(body("Pallets", "20000.00", "Main st 1", DEADLINE))).isEmpty();
+        assertThat(body("Pallets", "12.50", "Main st 1", DEADLINE).weightKg()).isEqualByComparingTo("12.5");
+    }
+
+    @Test
     void textLengthsAreLimited() {
         assertThat(fields(body("x".repeat(201), "1", "y".repeat(501), DEADLINE)))
                 .containsExactlyInAnyOrder("cargoDescription", "deliveryAddress");
