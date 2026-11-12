@@ -94,6 +94,22 @@ class PatchBodyParsingTest {
     }
 
     @Test
+    void commentLengthIsMeasuredOnTheStrippedText() {
+        String text = "x".repeat(1990) + " ".repeat(20);
+
+        assertThat(parse("{\"version\":1,\"comment\":\"" + text + "\"}").comment().value()).hasSize(1990);
+    }
+
+    @Test
+    void commentLengthCountsCharactersNotUtf16Units() {
+        String emoji = "😀"; // one character, two UTF-16 units
+        String fits = emoji.repeat(2000);
+
+        assertThat(parse("{\"version\":1,\"comment\":\"" + fits + "\"}").comment().value()).isEqualTo(fits);
+        assertInvalid("{\"version\":1,\"comment\":\"" + emoji.repeat(2001) + "\"}", "comment");
+    }
+
+    @Test
     void bodyMustBeAnObject() {
         assertInvalid("[1,2]", "body");
     }

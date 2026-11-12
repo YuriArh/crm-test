@@ -20,11 +20,9 @@ public record CreateRequestBody(
         @NotBlank @Size(max = 500) String deliveryAddress,
         @NotNull LocalDate deadline) {
 
-    /** {@code 12.50} is the same weight as {@code 12.5}: drop trailing zeros before the one-decimal check. */
+    /** Canonical weight before validation, so {@code 12.50} passes the one-decimal check like {@code 12.5}. */
     public CreateRequestBody {
-        if (weightKg != null) {
-            weightKg = weightKg.stripTrailingZeros();
-        }
+        weightKg = DeliveryContent.canonicalWeight(weightKg);
     }
 
     public DeliveryContent toContent() {

@@ -70,6 +70,12 @@ class CreateRequestBodyValidationTest {
     }
 
     @Test
+    void wholeWeightStaysAPlainNumber() {
+        assertThat(body("Pallets", "20000", "Main st 1", DEADLINE).weightKg()).hasToString("20000");
+        assertThat(body("Pallets", "100.00", "Main st 1", DEADLINE).weightKg()).hasToString("100");
+    }
+
+    @Test
     void textLengthsAreLimited() {
         assertThat(fields(body("x".repeat(201), "1", "y".repeat(501), DEADLINE)))
                 .containsExactlyInAnyOrder("cargoDescription", "deliveryAddress");

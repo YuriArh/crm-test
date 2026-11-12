@@ -108,6 +108,23 @@ class RequestUpdateTests {
     }
 
     @Test
+    void initiatorSendingTheUnchangedAssigneeCanStillComment() throws Exception {
+        // A client that always sends the whole form: assignee is empty and stays empty.
+        patchAs(NORTH_INITIATOR_LOGIN, "{\"version\":0,\"comment\":\"Fragile\",\"assigneeId\":null}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.comment").value("Fragile"));
+
+        // Same with an assignee set by the operator.
+        patchAs(NORTH_OPERATOR_LOGIN, "{\"version\":1,\"assigneeId\":\"" + NORTH_OPERATOR + "\"}")
+                .andExpect(status().isOk());
+        patchAs(NORTH_INITIATOR_LOGIN,
+                "{\"version\":2,\"comment\":\"Very fragile\",\"assigneeId\":\"" + NORTH_OPERATOR + "\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.comment").value("Very fragile"))
+                .andExpect(jsonPath("$.assignee.id").value(NORTH_OPERATOR.toString()));
+    }
+
+    @Test
     void assigneeMustBeAnOperatorOfTheSameService() throws Exception {
         for (UUID candidate : new UUID[] {NORTH_INITIATOR, SOUTH_INITIATOR, UUID.randomUUID()}) {
             patchAs(NORTH_OPERATOR_LOGIN, "{\"version\":0,\"assigneeId\":\"" + candidate + "\"}")

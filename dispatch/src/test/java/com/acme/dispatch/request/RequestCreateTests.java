@@ -177,6 +177,23 @@ class RequestCreateTests {
     }
 
     @Test
+    void wholeWeightWithTrailingDecimalsIsTheSameRequest() throws Exception {
+        String key = key();
+        MvcResult first = create(NORTH_INITIATOR_LOGIN, key, body("Steel", "20000", "Main st 1", "2026-11-20"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.weightKg").value(20000))
+                .andReturn();
+
+        String secondId = idOf(create(NORTH_INITIATOR_LOGIN, key, body("Steel", "20000.0", "Main st 1", "2026-11-20"))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Idempotent-Replayed", "true"))
+                .andReturn());
+
+        assertThat(secondId).isEqualTo(idOf(first));
+        assertThat(jdbc.sql("SELECT request_hash FROM idempotency_key").query(String.class).single()).hasSize(64);
+    }
+
+    @Test
     void sameKeyWithADifferentBodyIsRejected() throws Exception {
         String key = key();
         create(NORTH_INITIATOR_LOGIN, key, VALID).andExpect(status().isCreated());

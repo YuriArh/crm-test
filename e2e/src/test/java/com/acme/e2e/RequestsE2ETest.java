@@ -70,10 +70,16 @@ class RequestsE2ETest {
         assertThat(stale.code()).isEqualTo("VERSION_CONFLICT");
         assertThat(stale.body().get("current").get("version").asLong()).isEqualTo(1);
 
-        // The initiator cannot assign.
-        E2eClient.Response initiatorAssign = northInitiator.patch("/api/requests/" + id,
+        // Sending the unchanged assignee is a no-op, but actually changing it is for operators only.
+        E2eClient.Response sameAssignee = northInitiator.patch("/api/requests/" + id,
                 Map.of("version", 1, "assigneeId", operatorId));
-        assertThat(initiatorAssign.status()).isEqualTo(403);
+        assertThat(sameAssignee.status()).isEqualTo(200);
+        Map<String, Object> unassign = new java.util.HashMap<>();
+        unassign.put("version", 1);
+        unassign.put("assigneeId", null);
+        E2eClient.Response initiatorUnassign = northInitiator.patch("/api/requests/" + id, unassign);
+        assertThat(initiatorUnassign.status()).isEqualTo(403);
+        assertThat(initiatorUnassign.code()).isEqualTo("FORBIDDEN");
     }
 
     @Test

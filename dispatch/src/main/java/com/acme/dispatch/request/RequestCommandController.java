@@ -6,8 +6,6 @@ import java.net.URI;
 import java.util.UUID;
 
 import com.acme.dispatch.auth.CurrentUser;
-import com.acme.dispatch.common.web.ApiException;
-import com.acme.dispatch.common.web.ErrorCode;
 import com.acme.dispatch.idempotency.IdempotentOutcome;
 
 import jakarta.validation.Valid;
@@ -41,10 +39,7 @@ class RequestCommandController {
     ResponseEntity<RequestCard> create(@AuthenticationPrincipal CurrentUser user,
                                        @RequestHeader(IDEMPOTENCY_KEY_HEADER) String idempotencyKey,
                                        @Valid @RequestBody CreateRequestBody body) {
-        if (idempotencyKey.isBlank()) {
-            throw new ApiException(ErrorCode.IDEMPOTENCY_KEY_REQUIRED,
-                    "Send a unique, non-empty Idempotency-Key header with this request");
-        }
+        // A missing header is reported by ApiExceptionHandler, a blank or too long one by IdempotencyService.
         IdempotentOutcome<RequestCard> outcome = service.create(user, idempotencyKey, body);
         return ResponseEntity.status(outcome.status())
                 .location(URI.create("/api/requests/" + outcome.resourceId()))

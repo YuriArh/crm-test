@@ -26,6 +26,13 @@ class PayloadHasherTest {
     }
 
     @Test
+    void weightReadBackFromTheDatabaseHashesLikeTheCreatedOne() {
+        // numeric(8,1) returns 20000.0; the request was created with 20000.
+        assertThat(PayloadHasher.hash(content("Pallets", "20000.0", "Main st 1")))
+                .isEqualTo(PayloadHasher.hash(content("Pallets", "20000", "Main st 1")));
+    }
+
+    @Test
     void anyFieldChangeChangesTheHash() {
         String base = PayloadHasher.hash(content("Pallets", "12.5", "Main st 1"));
 

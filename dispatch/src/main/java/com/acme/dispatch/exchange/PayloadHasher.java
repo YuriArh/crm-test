@@ -18,8 +18,9 @@ public final class PayloadHasher {
 
     public static String hash(DeliveryContent content) {
         // Length-prefixed fields: unambiguous whatever characters the values contain.
+        // The weight is canonicalized here too: content read back from numeric(8,1) has scale 1.
         String canonical = field(content.cargoDescription())
-                + field(content.weightKg().stripTrailingZeros().toPlainString())
+                + field(DeliveryContent.canonicalWeight(content.weightKg()).toPlainString())
                 + field(content.deliveryAddress())
                 + field(content.deadline().toString());
         return sha256(canonical);

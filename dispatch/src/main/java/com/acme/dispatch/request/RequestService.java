@@ -3,7 +3,6 @@ package com.acme.dispatch.request;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 
 import com.acme.dispatch.auth.AppUserRepository;
@@ -64,9 +63,10 @@ public class RequestService {
         if (!RequestPermissions.canCreate(user)) {
             throw ApiException.forbidden("Only initiators create delivery requests");
         }
+        // The body already holds the canonical weight, so 12.5 and 12.50 hash the same.
         DeliveryContent content = body.toContent();
         IdempotentOutcome<RequestCard> outcome = idempotency.execute(user.id(), idempotencyKey, CREATE_OPERATION,
-                normalizedForHash(content), RequestCard.class, () -> createNew(user, content));
+                content, RequestCard.class, () -> createNew(user, content));
         if (!outcome.replayed()) {
             log.info("Delivery request {} created by {}", outcome.body().number(), user.username());
         }
@@ -75,7 +75,9 @@ public class RequestService {
 
     /**
      * Changes the comment and/or the assignee. Values equal to the current ones are a no-op (200, no
-     * version bump), so a repeated click does not show a conflict; otherwise {@code version} must match.
+     * version bump, no rights or version check), so a repeated click — or a client that always sends
+     * the whole form — does not get a conflict or a 403 for fields it did not change. Rights and
+     * {@code version} are checked only for fields that actually change.
      */
     @Transactional
     public RequestCard update(CurrentUser user, UUID id, UpdateRequestBody body) {
@@ -83,43 +85,37 @@ public class RequestService {
                 .filter(found -> RequestPermissions.canView(user, found.getOwnerId(), found.getServiceId()))
                 .orElseThrow(() -> RequestQueryService.notFound(id));
 
-        if (body.assigneeId().present() && !RequestPermissions.canAssign(user, request.getServiceId())) {
-            throw ApiException.forbidden("Only an operator of the request's service assigns it");
-        }
-        if (body.comment().present()
-                && !RequestPermissions.canComment(user, request.getOwnerId(), request.getServiceId())) {
-            throw ApiException.forbidden("You cannot comment on this request");
-        }
-
-        boolean commentChanges = body.comment().present()
-                && !Objects.equals(body.comment().value(), request.getComment());
-        boolean assigneeChanges = body.assigneeId().present()
-                && !Objects.equals(body.assigneeId().value(), request.getAssigneeId());
-        if (!commentChanges && !assigneeChanges) {
+        // The aggregate decides what changes. It is only an in-memory copy: if a check below fails,
+        // it is discarded without being saved.
+        Instant now = calendar.now();
+        boolean commentChanged = body.comment().present()
+                && request.changeComment(body.comment().value(), now);
+        boolean assigneeChanged = body.assigneeId().present()
+                && request.changeAssignee(body.assigneeId().value(), now);
+        if (!commentChanged && !assigneeChanged) {
             return queries.getCard(id, user);
         }
 
+        if (assigneeChanged && !RequestPermissions.canAssign(user, request.getServiceId())) {
+            throw ApiException.forbidden("Only an operator of the request's service assigns it");
+        }
+        if (commentChanged && !RequestPermissions.canComment(user, request.getOwnerId(), request.getServiceId())) {
+            throw ApiException.forbidden("You cannot comment on this request");
+        }
         if (body.version() != request.getVersion()) {
             throw versionConflict(id, user);
         }
-        if (assigneeChanges && body.assigneeId().value() != null) {
-            checkAssignee(body.assigneeId().value(), request.getServiceId());
+        if (assigneeChanged && request.getAssigneeId() != null) {
+            checkAssignee(request.getAssigneeId(), request.getServiceId());
         }
 
-        Instant now = calendar.now();
-        if (commentChanges) {
-            request.changeComment(body.comment().value(), now);
-        }
-        if (assigneeChanges) {
-            request.changeAssignee(body.assigneeId().value(), now);
-        }
         try {
             requests.save(request);
         } catch (OptimisticLockingFailureException e) {
             throw versionConflict(id, user);
         }
         log.info("Delivery request {} updated by {} (comment: {}, assignee: {})",
-                id, user.username(), commentChanges, assigneeChanges);
+                id, user.username(), commentChanged, assigneeChanged);
         return queries.getCard(id, user);
     }
 
@@ -153,11 +149,5 @@ public class RequestService {
         return new ApiException(ErrorCode.VERSION_CONFLICT,
                 "The request was changed by someone else; review the current state and try again",
                 Map.of("current", queries.getCard(id, user)));
-    }
-
-    /** {@code 12.5} and {@code 12.50} kg are the same request, so the idempotency hash must not tell them apart. */
-    private static DeliveryContent normalizedForHash(DeliveryContent content) {
-        return new DeliveryContent(content.cargoDescription(), content.weightKg().stripTrailingZeros(),
-                content.deliveryAddress(), content.deadline());
     }
 }

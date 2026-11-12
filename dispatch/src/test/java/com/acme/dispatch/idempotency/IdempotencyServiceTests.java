@@ -154,13 +154,17 @@ class IdempotencyServiceTests {
 
     @Test
     void blankOrTooLongKeyIsRejected() {
-        for (String key : new String[] {"", "   ", null, "k".repeat(101)}) {
+        for (String key : new String[] {"", "   ", null}) {
             assertThatThrownBy(() -> call(NORTH_INITIATOR, key, OPERATION,
                     new CreateCommand("Pallets", 10), countingAction(UUID.randomUUID())))
                     .as("key %s", key)
                     .isInstanceOfSatisfying(ApiException.class,
-                            e -> assertThat(e.code()).isEqualTo(ErrorCode.VALIDATION_FAILED));
+                            e -> assertThat(e.code()).isEqualTo(ErrorCode.IDEMPOTENCY_KEY_REQUIRED));
         }
+        assertThatThrownBy(() -> call(NORTH_INITIATOR, "k".repeat(101), OPERATION,
+                new CreateCommand("Pallets", 10), countingAction(UUID.randomUUID())))
+                .isInstanceOfSatisfying(ApiException.class,
+                        e -> assertThat(e.code()).isEqualTo(ErrorCode.VALIDATION_FAILED));
         assertThat(actionRuns).hasValue(0);
 
         call(NORTH_INITIATOR, "k".repeat(100), OPERATION, new CreateCommand("Pallets", 10),

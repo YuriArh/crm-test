@@ -63,11 +63,14 @@ public record UpdateRequestBody(long version, FieldChange<UUID> assigneeId, Fiel
                 comment = FieldChange.of(null);
             } else if (!node.isString()) {
                 errors.add(error("comment", "must be a string or null"));
-            } else if (node.asString().length() > MAX_COMMENT_LENGTH) {
-                errors.add(error("comment", "size must be at most " + MAX_COMMENT_LENGTH));
             } else {
+                // Measure what is stored: the stripped text, in characters (code points) as varchar counts them.
                 String text = node.asString().strip();
-                comment = FieldChange.of(text.isEmpty() ? null : text);
+                if (text.codePointCount(0, text.length()) > MAX_COMMENT_LENGTH) {
+                    errors.add(error("comment", "size must be at most " + MAX_COMMENT_LENGTH + " characters"));
+                } else {
+                    comment = FieldChange.of(text.isEmpty() ? null : text);
+                }
             }
         }
 

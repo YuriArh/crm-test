@@ -68,7 +68,7 @@ public class IdempotencyService {
      * Runs {@code action} once per {@code (userId, key)}; a repeat with the same operation and request
      * returns the stored response deserialized as {@code bodyType} with {@code replayed = true}.
      *
-     * @throws ApiException {@code VALIDATION_FAILED} for a blank or too long key,
+     * @throws ApiException {@code IDEMPOTENCY_KEY_REQUIRED} for a blank key, {@code VALIDATION_FAILED} for a too long key,
      *                      {@code IDEMPOTENCY_KEY_REUSED} if the key was used for another operation or request
      */
     @Transactional(propagation = Propagation.MANDATORY)
@@ -136,7 +136,9 @@ public class IdempotencyService {
 
     static void validateKey(String key) {
         if (key == null || key.isBlank()) {
-            throw new ApiException(ErrorCode.VALIDATION_FAILED, "Idempotency-Key must not be blank");
+            // The same code the API returns for a missing header: one rule, one code.
+            throw new ApiException(ErrorCode.IDEMPOTENCY_KEY_REQUIRED,
+                    "Send a unique, non-empty Idempotency-Key header with this request");
         }
         if (key.codePointCount(0, key.length()) > MAX_KEY_LENGTH) {
             throw new ApiException(ErrorCode.VALIDATION_FAILED,
