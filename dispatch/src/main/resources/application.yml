@@ -29,6 +29,10 @@ management:
 
 app:
   timezone: ${APP_TIMEZONE:Europe/Moscow}
+  carrier:
+    base-url: ${CARRIER_URL:http://localhost:8081}
+    connect-timeout: ${CARRIER_CONNECT_TIMEOUT:2s}
+    read-timeout: ${CARRIER_READ_TIMEOUT:5s}
 
 logging:
   level:
