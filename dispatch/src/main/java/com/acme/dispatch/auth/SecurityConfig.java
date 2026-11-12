@@ -29,11 +29,11 @@ import org.springframework.security.web.csrf.CsrfException;
 @Configuration(proxyBeanMethods = false)
 public class SecurityConfig {
 
-    /** Endpoints reachable without a session. */
     /** CSRF cookie the SPA reads and the header it echoes the value in. */
     static final String CSRF_COOKIE = "XSRF-TOKEN";
     static final String CSRF_HEADER = "X-XSRF-TOKEN";
 
+    /** Endpoints reachable without a session. */
     static final String[] PUBLIC_ENDPOINTS = {
             "/actuator/health", "/actuator/health/**",
             "/api/system/info",

@@ -62,16 +62,20 @@ public final class E2eClient {
     }
 
     public Response post(String path, Object body, Map<String, String> headers) {
-        return send(HttpRequest.newBuilder(uri(path)).POST(jsonBody(body)), withCsrf(headers));
+        return send(jsonRequest(path).POST(jsonBody(body)), withCsrf(headers));
     }
 
     /** POST without the CSRF header, to check that the server rejects it. */
     public Response postWithoutCsrf(String path, Object body) {
-        return send(HttpRequest.newBuilder(uri(path)).POST(jsonBody(body)), Map.of());
+        return send(jsonRequest(path).POST(jsonBody(body)), Map.of());
     }
 
     public Response patch(String path, Object body) {
-        return send(HttpRequest.newBuilder(uri(path)).method("PATCH", jsonBody(body)), withCsrf(Map.of()));
+        return send(jsonRequest(path).method("PATCH", jsonBody(body)), withCsrf(Map.of()));
+    }
+
+    private static HttpRequest.Builder jsonRequest(String path) {
+        return HttpRequest.newBuilder(uri(path)).header("Content-Type", "application/json");
     }
 
     public static Map<String, String> idempotencyKey(String key) {
