@@ -1,0 +1,18 @@
+# Gradle / Java
+.gradle/
+build/
+out/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Node (web, later)
+node_modules/
+dist/
+
+# Local environment
+.env
+.DS_Store

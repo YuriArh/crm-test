@@ -1,0 +1,52 @@
+name: exchange
+
+# Resource budget (NF08): backend + postgres + emulator together get at most
+# 2 CPUs and 4 GiB. Planned split: postgres 0.6 CPU / 1.25 GiB,
+# backend 0.8 CPU / 1.5 GiB, emulator 0.6 CPU / 1.25 GiB (added later).
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-exchange}
+      POSTGRES_USER: ${DB_USER:-exchange}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-exchange}
+      TZ: UTC
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    deploy:
+      resources:
+        limits:
+          cpus: "0.6"
+          memory: 1280M
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-exchange}
+      DB_USER: ${DB_USER:-exchange}
+      DB_PASSWORD: ${DB_PASSWORD:-exchange}
+      APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Moscow}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.8"
+          memory: 1536M
+
+volumes:
+  pgdata:
