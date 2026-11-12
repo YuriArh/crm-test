@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import com.acme.dispatch.auth.CurrentUser;
@@ -147,9 +148,11 @@ public class RequestQueryDao {
         BusinessResult result = resultAt == null && trackingNumber == null && price == null && rejectionReason == null
                 ? null
                 : new BusinessResult(trackingNumber, price, rejectionReason, resultAt);
+        // next_attempt_at is only meaningful while the operation is waiting in the send queue.
+        boolean queued = Set.of("PENDING", "RETRY_WAIT", "UNKNOWN").contains(rs.getString("delivery_status"));
         ExchangeInfo exchange = new ExchangeInfo(
                 rs.getInt("attempts"),
-                instant(rs, "next_attempt_at"),
+                queued ? instant(rs, "next_attempt_at") : null,
                 rs.getString("last_error"),
                 instant(rs, "acknowledged_at"),
                 rs.getString("acknowledged_via"));

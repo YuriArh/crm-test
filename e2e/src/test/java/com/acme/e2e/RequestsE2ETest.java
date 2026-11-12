@@ -44,8 +44,12 @@ class RequestsE2ETest {
         assertThat(repeated.body().get("id").asString()).isEqualTo(id);
         assertThat(repeated.header("Idempotent-Replayed")).isEqualTo("true");
 
+        // The carrier executes it in the background; after the final result its version no longer changes
+        // (the result handler bumps the version, so edits below use the version read after it).
+        long version = Awaits.finalCard(northInitiator, id).get("version").asLong();
+
         // It is in the initiator's registry filtered by business status.
-        assertThat(idsIn(northInitiator.get("/api/requests?businessStatus=AWAITING&size=100"))).contains(id);
+        assertThat(idsIn(northInitiator.get("/api/requests?businessStatus=SUCCEEDED&size=100"))).contains(id);
 
         // The operator of the same service sees it and assigns himself.
         assertThat(idsIn(northOperator.get("/api/requests?size=100"))).contains(id);
@@ -54,10 +58,10 @@ class RequestsE2ETest {
         assertThat(operatorCard.body().get("exchange")).isNotNull();
         String operatorId = northOperator.get("/api/auth/me").body().get("id").asString();
         E2eClient.Response assigned = northOperator.patch("/api/requests/" + id,
-                Map.of("version", 0, "assigneeId", operatorId));
+                Map.of("version", version, "assigneeId", operatorId));
         assertThat(assigned.status()).isEqualTo(200);
         assertThat(assigned.body().get("assignee").get("id").asString()).isEqualTo(operatorId);
-        assertThat(assigned.body().get("version").asLong()).isEqualTo(1);
+        assertThat(assigned.body().get("version").asLong()).isEqualTo(version + 1);
 
         // An initiator of another service neither sees nor opens it.
         assertThat(southInitiator.get("/api/requests/" + id).status()).isEqualTo(404);
@@ -65,17 +69,17 @@ class RequestsE2ETest {
 
         // Editing with an outdated version is a conflict, not a silent overwrite.
         E2eClient.Response stale = northInitiator.patch("/api/requests/" + id,
-                Map.of("version", 0, "comment", "outdated edit"));
+                Map.of("version", version, "comment", "outdated edit"));
         assertThat(stale.status()).isEqualTo(409);
         assertThat(stale.code()).isEqualTo("VERSION_CONFLICT");
-        assertThat(stale.body().get("current").get("version").asLong()).isEqualTo(1);
+        assertThat(stale.body().get("current").get("version").asLong()).isEqualTo(version + 1);
 
         // Sending the unchanged assignee is a no-op, but actually changing it is for operators only.
         E2eClient.Response sameAssignee = northInitiator.patch("/api/requests/" + id,
-                Map.of("version", 1, "assigneeId", operatorId));
+                Map.of("version", version + 1, "assigneeId", operatorId));
         assertThat(sameAssignee.status()).isEqualTo(200);
         Map<String, Object> unassign = new java.util.HashMap<>();
-        unassign.put("version", 1);
+        unassign.put("version", version + 1);
         unassign.put("assigneeId", null);
         E2eClient.Response initiatorUnassign = northInitiator.patch("/api/requests/" + id, unassign);
         assertThat(initiatorUnassign.status()).isEqualTo(403);

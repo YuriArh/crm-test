@@ -10,10 +10,12 @@ Domain: a cargo delivery request (cargo, weight, address, deadline). Lifecycle: 
 
 ## Repository layout and status
 
-- `dispatch/` — the main application: accepts delivery requests, dispatches them to the carrier, tracks delivery and result, reconciles. Spring Boot 4 / Java 25 (package `com.acme.dispatch`). Stage-1 schema (Flyway V1–V5, see `docs/dispatch-design.md` §4), session sign-in and the requests API (create with `Idempotency-Key`, registry, card, `PATCH` comment/assignee) are implemented; the send worker, feed polling and reconciliation are not yet. Packages under `com.acme.dispatch`:
+- `dispatch/` — the main application: accepts delivery requests, dispatches them to the carrier, tracks delivery and result, reconciles. Spring Boot 4 / Java 25 (package `com.acme.dispatch`). Stage-1 schema (Flyway V1–V5, see `docs/dispatch-design.md` §4), session sign-in, the requests API (create with `Idempotency-Key`, registry, card, `PATCH` comment/assignee) and the exchange with the carrier (send worker with retries, feed polling, `ResultInbox`) are implemented; reconciliation, problems and operator actions are not yet. Packages under `com.acme.dispatch`:
   - `auth` — users, services, `CurrentUser` principal, `SecurityConfig` (session cookie, SPA CSRF, 401/403 as Problem Details), login/logout/me, operators list;
   - `request` — `DeliveryRequest` aggregate, `RequestService` (write side), `RequestQueryService`/`RequestQueryDao` (registry and card SQL), `RequestPermissions` (pure access policy), `OverduePolicy`, request bodies;
-  - `exchange` — `DispatchOperationDao` (operation row = send queue), `DeliveryStatus`, `PayloadHasher`;
+  - `carrier` — `CarrierClient` / `HttpCarrierClient` (the only code that knows the carrier's HTTP API; own DTOs per `contracts/carrier-api.yaml`; classifies submit outcomes);
+  - `exchange` — `DispatchOperationDao` (operation row = send queue), `DeliveryStatus`, `PayloadHasher`, `SendWorker` + `SendQueueDao` (claim/complete with conditional updates fenced by attempt number), `RetryPolicy`, `ExchangeAttemptDao`; `exchange/feed` — `FeedPoller`, `FeedCursorDao`; `exchange/inbox` — `ResultInbox` (single result handler), `ResultRules` (pure), `ResultMessage`, `InboxDao`;
+  - Exchange tests: `@IntegrationTest` replaces the carrier with `FakeCarrier` (programmable answers, feed, `duringSubmit` hook) and turns the background workers off (`app.exchange.enabled=false`) — call `SendWorker.runOnce()` / `FeedPoller.runOnce()`; create requests with `TestRequests`, feed entries with `TestFeed`.
   - `idempotency` — `IdempotencyService` (must run inside the caller's transaction);
   - `common` — `BusinessCalendar` (only source of "now"/"today"), `SqlTime`; `common/web` — `ErrorCode`, `ApiException`, `ApiExceptionHandler`, `ProblemResponseWriter`, `PageResponse`;
   - `config` — `AppProperties`, `Clock`, `IdGenerator` (UUIDv7).

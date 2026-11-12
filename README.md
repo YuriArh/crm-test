@@ -63,6 +63,15 @@ The operator sees only North requests; each initiator sees only their own.
 - Errors are Problem Details (RFC 9457) with a machine-readable `code`: `VALIDATION_FAILED` (with `errors[]` per field), `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_REUSED`, `UNAUTHENTICATED`, `BAD_CREDENTIALS`, `FORBIDDEN`, `NOT_FOUND`, `VERSION_CONFLICT` (with the `current` state), `INVALID_ASSIGNEE`. Other HTTP errors carry the status name as the code, e.g. `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`.
 - A repeated create with the same `Idempotency-Key` returns the first response with header `Idempotent-Replayed: true`.
 
+### How a request reaches its result
+
+1. `POST /api/requests` saves the request and puts its operation into the send queue in one transaction: `deliveryStatus: PENDING`, `businessStatus: AWAITING`.
+2. The send worker (every ~1 s) sends it to the carrier with its immutable `operationId` → `ACKNOWLEDGED`. If the carrier is unreachable or answers `5xx` → `RETRY_WAIT`; no answer in time → `UNKNOWN`; both are retried with the same `operationId` (pause from 5 s, doubling up to 5 min, at most 8 attempts, then `FAILED`). `4xx` → `FAILED`.
+3. The feed poller (every ~1 s) reads the carrier's result feed and passes each entry to one handler: the card moves to `IN_PROGRESS`, then `SUCCEEDED` (tracking number, price) or `REJECTED` (reason). Duplicates and outdated results have no effect; a final result is never overwritten.
+4. A result also confirms delivery: a request stuck in `UNKNOWN` becomes `ACKNOWLEDGED` and is not resent.
+
+Operators see the exchange state in the card's `exchange` block: attempts, next attempt, last error, when and how delivery was confirmed. Each result changes the request's `version`, so read the card again before editing.
+
 ### Walkthrough with curl
 
 ```bash
@@ -80,11 +89,11 @@ curl -s -c "$JAR" -b "$JAR" -H "X-XSRF-TOKEN: $(token)" -H 'Content-Type: applic
      -d '{"cargoDescription":"Pallets","weightKg":12.5,"deliveryAddress":"Main st 1","deadline":"2026-12-01"}' \
      $API/api/requests
 
-curl -s -b "$JAR" "$API/api/requests?businessStatus=AWAITING"
+curl -s -b "$JAR" "$API/api/requests?businessStatus=SUCCEEDED"   # a second or two later: executed by the carrier
 
-# Edit: use the id and version from the card
+# Edit: use the id and the current version from the card
 curl -s -c "$JAR" -b "$JAR" -X PATCH -H "X-XSRF-TOKEN: $(token)" -H 'Content-Type: application/json' \
-     -d '{"version":0,"comment":"Fragile"}' $API/api/requests/<id>
+     -d '{"version":<version>,"comment":"Fragile"}' $API/api/requests/<id>
 ```
 
 ## Carrier emulator

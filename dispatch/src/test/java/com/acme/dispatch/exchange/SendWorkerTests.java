@@ -12,10 +12,15 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import com.acme.dispatch.auth.AppUserRepository;
+import com.acme.dispatch.auth.CurrentUser;
 import com.acme.dispatch.carrier.SubmitOutcome;
 import com.acme.dispatch.carrier.SubmitRequest;
 import com.acme.dispatch.carrier.SubmitResult;
+import com.acme.dispatch.request.ExchangeInfo;
 import com.acme.dispatch.request.RequestCard;
+import com.acme.dispatch.request.RequestQueryService;
+import com.acme.dispatch.support.DemoData;
 import com.acme.dispatch.support.FakeCarrier;
 import com.acme.dispatch.support.IntegrationTest;
 import com.acme.dispatch.support.MutableClock;
@@ -48,6 +53,10 @@ class SendWorkerTests {
     MutableClock clock;
     @Autowired
     JdbcClient jdbc;
+    @Autowired
+    RequestQueryService cards;
+    @Autowired
+    AppUserRepository users;
 
     @BeforeEach
     void setUp() {
@@ -116,6 +125,25 @@ class SendWorkerTests {
         assertThat(carrier.submitted()).extracting(SubmitRequest::operationId)
                 .containsExactly(request.operationId(), request.operationId());
         assertThat(attempts(request)).containsExactly("1:TEMPORARY_ERROR:503:finished", "2:ACKNOWLEDGED:202:finished");
+    }
+
+    @Test
+    void operatorCardShowsTheNextAttemptOnlyWhileQueued() {
+        RequestCard request = requests.create("1");
+        carrier.answer(TEMPORARY);
+        CurrentUser operator = CurrentUser.from(users.findByUsernameIgnoreCase(DemoData.NORTH_OPERATOR_LOGIN).orElseThrow());
+
+        worker.runOnce();
+        ExchangeInfo waiting = cards.getCard(request.id(), operator).exchange();
+        assertThat(waiting.nextAttemptAt()).isNotNull();
+        assertThat(waiting.lastError()).isEqualTo("HTTP 503");
+
+        clock.advance(Duration.ofSeconds(6));
+        worker.runOnce();
+        ExchangeInfo delivered = cards.getCard(request.id(), operator).exchange();
+        assertThat(delivered.nextAttemptAt()).isNull();
+        assertThat(delivered.attempts()).isEqualTo(2);
+        assertThat(delivered.acknowledgedVia()).isEqualTo("RESPONSE");
     }
 
     @Test

@@ -42,11 +42,15 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-dispatch}
       APP_TIMEZONE: ${APP_TIMEZONE:-Europe/Moscow}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Inside the Docker network; the emulator may start later — dispatch retries and backs off.
+      CARRIER_URL: http://carrier-emulator:8081
     ports:
       - "${DISPATCH_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
+      carrier-emulator:
+        condition: service_started
     deploy:
       resources:
         limits:
