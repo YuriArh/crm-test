@@ -12,6 +12,11 @@ spring:
   mvc:
     problemdetails:
       enabled: true
+  task:
+    scheduling:
+      pool:
+        # Send worker and feed poller run in parallel: a slow send must not delay reading results.
+        size: 2
 
 server:
   port: ${SERVER_PORT:8080}
@@ -33,6 +38,8 @@ app:
     base-url: ${CARRIER_URL:http://localhost:8081}
     connect-timeout: ${CARRIER_CONNECT_TIMEOUT:2s}
     read-timeout: ${CARRIER_READ_TIMEOUT:5s}
+  exchange:
+    enabled: ${EXCHANGE_ENABLED:true}
 
 logging:
   level:

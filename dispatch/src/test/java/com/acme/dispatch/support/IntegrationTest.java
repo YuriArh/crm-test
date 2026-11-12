@@ -13,12 +13,15 @@ import org.springframework.context.annotation.Import;
 
 /**
  * Integration test against a real PostgreSQL (Testcontainers) with MockMvc and the test clock.
+ * The carrier is a {@link FakeCarrier}; the background exchange workers are off, tests call their
+ * {@code runOnce()} directly.
  * Every integration test uses this exact annotation so they all share one Spring context and one container.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
-@SpringBootTest
+@SpringBootTest(properties = "app.exchange.enabled=false")
 @AutoConfigureMockMvc
-@Import({TestcontainersConfiguration.class, TestClockConfiguration.class})
+@Import({TestcontainersConfiguration.class, TestClockConfiguration.class, FakeCarrierConfiguration.class,
+        TestRequests.class})
 public @interface IntegrationTest {
 }
