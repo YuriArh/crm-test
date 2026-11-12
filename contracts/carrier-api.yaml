@@ -24,8 +24,9 @@ info:
     **Receipt is not execution.** `202` only confirms that the carrier received the operation.
     Execution happens later in the background; its outcome appears in the result feed.
 
-    **Result feed.** `GET /results?after=N` returns entries with `feedSeq > N` in ascending order,
-    without gaps. The client stores the last processed `feedSeq` as its cursor. Per operation the feed
+    **Result feed.** `GET /results?after=N` returns entries with `feedSeq > N` in ascending order.
+    Entries become visible strictly in `feedSeq` order, so a cursor never skips an entry; the numbers
+    themselves may have gaps. The client stores the last processed `feedSeq` as its cursor. Per operation the feed
     normally has two entries: `IN_PROGRESS` (`sequence` 1) and the final `SUCCEEDED` or `REJECTED`
     (`sequence` 2).
 
@@ -162,6 +163,8 @@ paths:
                   value:
                     code: OPERATION_NOT_FOUND
                     message: Operation 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f is not known
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
         '503':
           $ref: '#/components/responses/Unavailable'
 
@@ -297,7 +300,9 @@ paths:
       tags: [admin]
       operationId: listOperations
       summary: List operations with execution counters
-      description: Lets a check confirm the carrier's actual state independently of `dispatch`.
+      description: |
+        Lets a check confirm the carrier's actual state independently of `dispatch`. Without a filter returns
+        the 100 newest operations.
       parameters:
         - name: operationId
           in: query
@@ -380,11 +385,15 @@ components:
                 message: Carrier is temporarily unavailable
 
   schemas:
-    DeliveryContent:
+    SubmitOperationRequest:
       type: object
-      description: Immutable content of a delivery operation.
-      required: [cargoDescription, weightKg, deliveryAddress, deadline]
+      description: Immutable content of a delivery operation with its identity.
+      additionalProperties: false
+      required: [operationId, cargoDescription, weightKg, deliveryAddress, deadline]
       properties:
+        operationId:
+          type: string
+          format: uuid
         cargoDescription:
           type: string
           minLength: 1
@@ -402,23 +411,6 @@ components:
           type: string
           format: date
           description: Last acceptable delivery date (inclusive). Stored by the carrier, not used in its decision.
-
-    SubmitOperationRequest:
-      type: object
-      additionalProperties: false
-      required: [operationId, cargoDescription, weightKg, deliveryAddress, deadline]
-      properties:
-        operationId:
-          type: string
-          format: uuid
-        cargoDescription:
-          $ref: '#/components/schemas/DeliveryContent/properties/cargoDescription'
-        weightKg:
-          $ref: '#/components/schemas/DeliveryContent/properties/weightKg'
-        deliveryAddress:
-          $ref: '#/components/schemas/DeliveryContent/properties/deliveryAddress'
-        deadline:
-          $ref: '#/components/schemas/DeliveryContent/properties/deadline'
 
     SubmitOperationResponse:
       type: object
@@ -492,17 +484,31 @@ components:
           format: date-time
 
     ResultEntry:
-      description: A feed entry — an operation result with its position in the feed.
-      allOf:
-        - type: object
-          required: [feedSeq]
-          properties:
-            feedSeq:
-              type: integer
-              format: int64
-              minimum: 1
-              description: Position in the feed; strictly increasing, without gaps.
-        - $ref: '#/components/schemas/OperationResult'
+      type: object
+      description: A feed entry — an operation result (see `OperationResult`) with its position in the feed.
+      required: [feedSeq, messageId, operationId, sequence, status, trackingNumber, price, reason, occurredAt]
+      properties:
+        feedSeq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Position in the feed; strictly increasing (numbers may have gaps).
+        messageId:
+          $ref: '#/components/schemas/OperationResult/properties/messageId'
+        operationId:
+          $ref: '#/components/schemas/OperationResult/properties/operationId'
+        sequence:
+          $ref: '#/components/schemas/OperationResult/properties/sequence'
+        status:
+          $ref: '#/components/schemas/OperationResult/properties/status'
+        trackingNumber:
+          $ref: '#/components/schemas/OperationResult/properties/trackingNumber'
+        price:
+          $ref: '#/components/schemas/OperationResult/properties/price'
+        reason:
+          $ref: '#/components/schemas/OperationResult/properties/reason'
+        occurredAt:
+          $ref: '#/components/schemas/OperationResult/properties/occurredAt'
 
     ResultPage:
       type: object
@@ -529,22 +535,38 @@ components:
           type: boolean
 
     AdminOperation:
-      description: Operation with its content and execution counters.
-      allOf:
-        - $ref: '#/components/schemas/OperationState'
-        - $ref: '#/components/schemas/DeliveryContent'
-        - type: object
-          required: [receivedCount, executionCount]
-          properties:
-            receivedCount:
-              type: integer
-              minimum: 1
-              description: How many times the operation was submitted, including repeats.
-            executionCount:
-              type: integer
-              minimum: 0
-              maximum: 1
-              description: How many times the operation was actually executed; never more than 1.
+      type: object
+      description: Operation state (see `OperationState`) with its content and execution counters.
+      required: [operationId, cargoDescription, weightKg, deliveryAddress, deadline, state, receivedAt, executedAt,
+                 result, receivedCount, executionCount]
+      properties:
+        operationId:
+          $ref: '#/components/schemas/OperationState/properties/operationId'
+        cargoDescription:
+          $ref: '#/components/schemas/SubmitOperationRequest/properties/cargoDescription'
+        weightKg:
+          $ref: '#/components/schemas/SubmitOperationRequest/properties/weightKg'
+        deliveryAddress:
+          $ref: '#/components/schemas/SubmitOperationRequest/properties/deliveryAddress'
+        deadline:
+          $ref: '#/components/schemas/SubmitOperationRequest/properties/deadline'
+        state:
+          $ref: '#/components/schemas/OperationState/properties/state'
+        receivedAt:
+          $ref: '#/components/schemas/OperationState/properties/receivedAt'
+        executedAt:
+          $ref: '#/components/schemas/OperationState/properties/executedAt'
+        result:
+          $ref: '#/components/schemas/OperationState/properties/result'
+        receivedCount:
+          type: integer
+          minimum: 1
+          description: How many times the operation was submitted, including repeats.
+        executionCount:
+          type: integer
+          minimum: 0
+          maximum: 1
+          description: How many times the operation was actually executed; never more than 1.
 
     Error:
       type: object

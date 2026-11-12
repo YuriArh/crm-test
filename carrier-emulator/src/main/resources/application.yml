@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: carrier-emulator
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:${DB_PORT:5432}/${DB_NAME:carrier}}
+    username: ${DB_USER:carrier}
+    password: ${DB_PASSWORD:carrier}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+  flyway:
+    locations: classpath:db/migration
+  jackson:
+    deserialization:
+      # The contract forbids unknown fields in request bodies.
+      fail-on-unknown-properties: true
+
+server:
+  port: ${SERVER_PORT:8081}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+carrier:
+  executor-enabled: ${CARRIER_EXECUTOR_ENABLED:true}
+
+logging:
+  level:
+    root: INFO
+    com.acme.carrier: ${LOG_LEVEL:INFO}
