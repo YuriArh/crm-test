@@ -7,5 +7,5 @@ dependencyResolutionManagement {
     }
 }
 
-include("backend")
-// include("emulator") — added when the emulator is implemented
+include("dispatch")
+// include("carrier-emulator") — added when the emulator is implemented

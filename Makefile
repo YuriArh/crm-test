@@ -16,13 +16,13 @@ down: ## Stop all services (data is kept)
 reset: ## Stop all services and delete the database volume
 	docker compose down -v
 
-logs: ## Follow backend logs
-	docker compose logs -f backend
+logs: ## Follow dispatch logs
+	docker compose logs -f dispatch
 
 ps: ## Show service status
 	docker compose ps
 
-db: ## Start only PostgreSQL (for running the backend from the IDE)
+db: ## Start only PostgreSQL (for running dispatch from the IDE)
 	docker compose up -d postgres
 
 build: ## Build all Gradle projects (with tests)
@@ -31,5 +31,5 @@ build: ## Build all Gradle projects (with tests)
 test: ## Run all tests (needs Docker for Testcontainers)
 	./gradlew test
 
-run: db ## Run the backend locally against the Docker database
-	./gradlew :backend:bootRun
+run: db ## Run dispatch locally against the Docker database
+	./gradlew :dispatch:bootRun

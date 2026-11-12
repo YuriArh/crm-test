@@ -6,7 +6,7 @@ plugins {
 val javaVersion = libs.versions.java.get().toInt()
 
 subprojects {
-    group = "com.acme.exchange"
+    group = "com.acme"
     version = "0.1.0"
 
     plugins.withId("java") {
