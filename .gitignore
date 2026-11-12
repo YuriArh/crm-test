@@ -13,6 +13,9 @@ out/
 node_modules/
 dist/
 
+# Claude Code agent worktrees
+.claude/worktrees/
+
 # Local environment
 .env
 .DS_Store
