@@ -27,5 +27,6 @@ tasks.test {
         providers.gradleProperty("e2e").isPresent
     }
     systemProperty("e2e.baseUrl", providers.environmentVariable("E2E_BASE_URL").getOrElse("http://localhost:8080"))
+    systemProperty("e2e.carrierUrl", providers.environmentVariable("CARRIER_BASE_URL").getOrElse("http://localhost:8081"))
     outputs.upToDateWhen { false }
 }

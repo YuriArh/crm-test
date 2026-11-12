@@ -17,8 +17,12 @@ Domain: a cargo delivery request (cargo, weight, address, deadline). Lifecycle: 
   - `idempotency` — `IdempotencyService` (must run inside the caller's transaction);
   - `common` — `BusinessCalendar` (only source of "now"/"today"), `SqlTime`; `common/web` — `ErrorCode`, `ApiException`, `ApiExceptionHandler`, `ProblemResponseWriter`, `PageResponse`;
   - `config` — `AppProperties`, `Clock`, `IdGenerator` (UUIDv7).
-- `e2e/` — end-to-end tests over real HTTP against the running Docker stack (`E2eClient`: cookie jar, CSRF, JSON). Skipped by `./gradlew build`; run with `make e2e` after `make up`. They create their own data and must pass repeatedly on a non-empty database.
-- `carrier-emulator/` — emulator of the external carrier: separate Spring Boot app (package `com.acme.carrier`) with its **own database** (database `carrier` in the shared PostgreSQL container). Deliberately minimal test stand; design in `docs/carrier-emulator-design.md`. Not implemented yet. When added, include it in `settings.gradle.kts` and `docker-compose.yml`.
+- `e2e/` — end-to-end tests over real HTTP against the running Docker stack (`E2eClient`: cookie jar, CSRF, JSON, for dispatch; `CarrierClient`: plain JSON, for the emulator at `CARRIER_BASE_URL`). Skipped by `./gradlew build`; run with `make e2e` after `make up`. They create their own data and must pass repeatedly on a non-empty database.
+- `carrier-emulator/` — emulator of the external carrier: separate Spring Boot app (package `com.acme.carrier`) with its **own database** (database `carrier` in the shared PostgreSQL container). Deliberately minimal test stand; design in `docs/carrier-emulator-design.md`. The core works (receipt, at-most-once background execution, result feed, operation state, admin counters); fault modes are not implemented yet. Data access is `JdbcClient` only; own Flyway migrations; port 8081. The database and user are created by `docker/postgres/init/01-carrier-db.sh` on an empty volume only (existing volume → `make reset`). Packages under `com.acme.carrier`:
+  - `operation` — `POST /operations` (idempotent by `operationId`, `ContentHash`; repeat counted, other content → `409`), `GET /operations/{id}`, `OperationDao` (state + latest result via a lateral join);
+  - `execution` — `Executor` (single scheduler thread, the only feed writer: `ACCEPTED → EXECUTED` by conditional `UPDATE`, publishes `IN_PROGRESS` + final), `OutcomePolicy` (pure, deterministic);
+  - `feed` — `GET /results`; `admin` — `GET /admin/operations`; `web` — `{code, message}` errors; `config` — `Clock`, UUIDv7, `CarrierProperties`.
+  - Tests: `@IntegrationTest` (Testcontainers, fixed clock, executor off — call `Executor.runOnce()`); every MockMvc response is checked against `contracts/carrier-api.yaml` with `Contract.matchesContract()` — keep doing that in new tests.
 - `contracts/` — OpenAPI contracts (`dispatch-api.yaml` for dispatch↔web, `carrier-api.yaml` for dispatch↔carrier-emulator); `carrier-api.yaml` is written (also holds the exchange rules and the emulator's `admin` endpoints); `dispatch-api.yaml` is not yet. Lint with `make contracts-lint` after every change in `contracts/`. `dispatch` and `carrier-emulator` must **not share Java classes**: the emulator stands in for an external system, so the contract in `contracts/` is the only agreement between them.
 - `web/` — planned React + TypeScript + Vite client, a separate npm project (not in Gradle). The UI and the API are served from one origin (Vite proxy in dev, nginx in Docker), so session cookies work without CORS.
 
@@ -28,14 +32,16 @@ Gradle multi-project build: the root `build.gradle.kts` configures the Java 25 t
 
 ```bash
 cp .env.example .env   # first time
-make up                # build and start postgres + dispatch in Docker
+make up                # build and start postgres + dispatch + carrier-emulator in Docker
 make db                # only PostgreSQL (for running dispatch from the IDE)
 make run               # make db + ./gradlew :dispatch:bootRun
 make test              # ./gradlew test — needs Docker running (Testcontainers)
 make build             # ./gradlew build (with tests)
 make reset             # stop everything and delete the DB volume
-make logs              # follow dispatch logs
-make e2e               # e2e tests against the running stack (waits for health first)
+make logs              # follow dispatch logs (make logs-carrier — emulator)
+make e2e               # e2e tests against the running stack (waits for both services first)
+make carrier-ops       # emulator operations with receivedCount / executionCount
+make contracts-lint    # lint contracts/ (Redocly CLI in Docker)
 ```
 
 Verification gate for every change: `./gradlew build` (unit + integration) green, then `make up && make e2e` green. Changes in `contracts/` also need `make contracts-lint` green.

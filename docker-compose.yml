@@ -1,8 +1,8 @@
 name: exchange
 
 # Resource budget (NF08): dispatch + postgres + carrier-emulator together get at most
-# 2 CPUs and 4 GiB. Planned split: postgres 0.6 CPU / 1.25 GiB,
-# dispatch 0.8 CPU / 1.5 GiB, carrier-emulator 0.6 CPU / 1.25 GiB (added later).
+# 2 CPUs and 4 GiB. Split: postgres 0.6 CPU / 1.25 GiB, dispatch 0.8 CPU / 1.5 GiB,
+# carrier-emulator 0.4 CPU / 0.75 GiB (total 1.8 CPU / 3.5 GiB).
 
 services:
   postgres:
@@ -11,11 +11,16 @@ services:
       POSTGRES_DB: ${DB_NAME:-dispatch}
       POSTGRES_USER: ${DB_USER:-dispatch}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-dispatch}
+      # Own database of carrier-emulator, created by docker/postgres/init on an empty volume.
+      CARRIER_DB_NAME: ${CARRIER_DB_NAME:-carrier}
+      CARRIER_DB_USER: ${CARRIER_DB_USER:-carrier}
+      CARRIER_DB_PASSWORD: ${CARRIER_DB_PASSWORD:-carrier}
       TZ: UTC
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -47,6 +52,27 @@ services:
         limits:
           cpus: "0.8"
           memory: 1536M
+
+  carrier-emulator:
+    build:
+      context: .
+      dockerfile: carrier-emulator/Dockerfile
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${CARRIER_DB_NAME:-carrier}
+      DB_USER: ${CARRIER_DB_USER:-carrier}
+      DB_PASSWORD: ${CARRIER_DB_PASSWORD:-carrier}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    # Published for checks from the host (make carrier-ops, e2e); dispatch reaches it inside the network.
+    ports:
+      - "${CARRIER_PORT:-8081}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.4"
+          memory: 768M
 
 volumes:
   pgdata:

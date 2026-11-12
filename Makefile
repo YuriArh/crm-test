@@ -2,11 +2,12 @@
 -include .env
 export
 
-.PHONY: help up down reset logs ps db build test run wait e2e contracts-lint
+.PHONY: help up down reset logs logs-carrier ps db build test run wait e2e contracts-lint carrier-ops
 
 REDOCLY_IMAGE := redocly/cli:1.34.3
 
 E2E_BASE_URL ?= http://localhost:$(or $(DISPATCH_PORT),8080)
+CARRIER_BASE_URL ?= http://localhost:$(or $(CARRIER_PORT),8081)
 
 help: ## Show available commands
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
@@ -23,6 +24,9 @@ reset: ## Stop all services and delete the database volume
 logs: ## Follow dispatch logs
 	docker compose logs -f dispatch
 
+logs-carrier: ## Follow carrier-emulator logs
+	docker compose logs -f carrier-emulator
+
 ps: ## Show service status
 	docker compose ps
 
@@ -38,12 +42,17 @@ test: ## Run all tests (needs Docker for Testcontainers)
 run: db ## Run dispatch locally against the Docker database
 	./gradlew :dispatch:bootRun
 
-wait: ## Wait until dispatch reports healthy (up to 90 s)
-	@for i in $$(seq 1 45); do curl -sf $(E2E_BASE_URL)/actuator/health >/dev/null && exit 0; sleep 2; done; \
-	echo "dispatch is not healthy at $(E2E_BASE_URL)"; exit 1
+wait: ## Wait until dispatch and carrier-emulator report healthy (up to 90 s each)
+	@for url in $(E2E_BASE_URL) $(CARRIER_BASE_URL); do \
+	  ok=; for i in $$(seq 1 45); do curl -sf $$url/actuator/health >/dev/null && { ok=1; break; }; sleep 2; done; \
+	  [ -n "$$ok" ] || { echo "not healthy at $$url"; exit 1; }; \
+	done
 
 e2e: wait ## Run end-to-end tests against the running stack (start it with make up)
-	E2E_BASE_URL=$(E2E_BASE_URL) ./gradlew :e2e:test -Pe2e
+	E2E_BASE_URL=$(E2E_BASE_URL) CARRIER_BASE_URL=$(CARRIER_BASE_URL) ./gradlew :e2e:test -Pe2e
+
+carrier-ops: ## Show carrier-emulator operations with execution counters (newest 100)
+	@curl -sf $(CARRIER_BASE_URL)/admin/operations || echo "carrier-emulator is not reachable at $(CARRIER_BASE_URL)"
 
 contracts-lint: ## Lint the OpenAPI contracts in contracts/ (Redocly CLI in Docker)
 	docker run --rm -v "$(CURDIR)/contracts:/spec" -w /spec $(REDOCLY_IMAGE) lint carrier-api.yaml

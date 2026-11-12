@@ -7,8 +7,9 @@ Test assignment: `04-system-integration.md`. Work plan: `docs/PLAN.md`.
 ```
 dispatch/          main application: accepts delivery requests, dispatches them
                    to the carrier, tracks delivery and result, reconciles
-carrier-emulator/  emulator of the external delivery carrier (not implemented yet)
-contracts/         OpenAPI contracts
+carrier-emulator/  emulator of the external delivery carrier (own database `carrier`)
+contracts/         OpenAPI contracts (carrier-api.yaml: dispatch ↔ carrier)
+docker/            PostgreSQL init script (creates the carrier database)
 web/               React client (later)
 docs/              plan and documentation
 ```
@@ -22,13 +23,15 @@ docs/              plan and documentation
 
 ```bash
 cp .env.example .env
-make up        # build and start postgres + dispatch
+make up        # build and start postgres + dispatch + carrier-emulator
 make ps        # service status
 ```
 
-Check: `curl http://localhost:8080/actuator/health` and `curl http://localhost:8080/api/system/info`.
+Check: `curl http://localhost:8080/actuator/health`, `curl http://localhost:8080/api/system/info` and `curl http://localhost:8081/actuator/health` (emulator).
 
-If port 5432 or 8080 is already taken, change `DB_PORT` / `DISPATCH_PORT` in `.env`. Both `docker compose` and `make run` read it.
+If port 5432, 8080 or 8081 is already taken, change `DB_PORT` / `DISPATCH_PORT` / `CARRIER_PORT` in `.env`. Both `docker compose` and `make run` read it.
+
+The emulator's database is created by `docker/postgres/init` only when the PostgreSQL volume is empty. If the stack was started before the emulator existed, run `make reset` once (it deletes local data).
 
 ## Demo users
 
@@ -84,12 +87,38 @@ curl -s -c "$JAR" -b "$JAR" -X PATCH -H "X-XSRF-TOKEN: $(token)" -H 'Content-Typ
      -d '{"version":0,"comment":"Fragile"}' $API/api/requests/<id>
 ```
 
+## Carrier emulator
+
+`carrier-emulator` (port 8081) stands in for the external delivery carrier. Contract and exchange rules: `contracts/carrier-api.yaml`; design: `docs/carrier-emulator-design.md`. Fault modes are not implemented yet.
+
+| Method and path | What |
+|---|---|
+| `POST /operations` | receive an operation; `202` also for a repeat with the same content (no second execution), `409 PAYLOAD_MISMATCH` for the same `operationId` with other content |
+| `GET /operations/{operationId}` | carrier's state and latest result (for reconciliation); `404` if unknown |
+| `GET /results?after=N&limit=100` | result feed after cursor `N`: `IN_PROGRESS`, then `SUCCEEDED` / `REJECTED` |
+| `GET /admin/operations[?operationId=]` | operations with `receivedCount` and `executionCount` (also `make carrier-ops`) |
+
+- Operations are executed in the background about a second after receipt.
+- The outcome is deterministic: weight over 10 000 kg or an address containing `тест-отказ` → rejected; otherwise a tracking number `TRK-…` and price `300 + 25 × weight`.
+- Assumption: no authentication — the emulator is a local test stand inside the Docker network.
+
+```bash
+ID=$(uuidgen)
+curl -s -H 'Content-Type: application/json' \
+     -d "{\"operationId\":\"$ID\",\"cargoDescription\":\"Pallets\",\"weightKg\":12.5,\"deliveryAddress\":\"Main st 1\",\"deadline\":\"2026-12-01\"}" \
+     localhost:8081/operations
+sleep 2
+curl -s localhost:8081/operations/$ID
+curl -s "localhost:8081/results?after=0"
+```
+
 ## Tests
 
 ```bash
 make test      # unit + integration tests (integration tests use Testcontainers: Docker must be running)
 make up        # start the stack
 make e2e       # end-to-end tests over real HTTP against the running stack
+make contracts-lint   # lint contracts/ (after changing a contract)
 ```
 
 e2e tests create their own data and can run repeatedly against a non-empty database.
