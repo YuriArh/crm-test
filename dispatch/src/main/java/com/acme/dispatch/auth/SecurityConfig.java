@@ -57,11 +57,16 @@ public class SecurityConfig {
                 .exceptionHandling(errors -> errors
                         .authenticationEntryPoint((request, response, ex) ->
                                 problems.write(request, response, ErrorCode.UNAUTHENTICATED, "Sign in first"))
-                        .accessDeniedHandler((request, response, ex) ->
-                                problems.write(request, response, ErrorCode.FORBIDDEN,
-                                        ex instanceof CsrfException
-                                                ? "Missing or invalid CSRF token"
-                                                : "Access denied")))
+                        .accessDeniedHandler((request, response, ex) -> {
+                            // A separate code lets the client tell a stale token (fetch a new one and
+                            // repeat) from a real denial (repeating cannot help).
+                            if (ex instanceof CsrfException) {
+                                problems.write(request, response, ErrorCode.CSRF_INVALID,
+                                        "Missing or invalid CSRF token");
+                            } else {
+                                problems.write(request, response, ErrorCode.FORBIDDEN, "Access denied");
+                            }
+                        }))
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .logout(AbstractHttpConfigurer::disable);

@@ -123,7 +123,7 @@ class AuthTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(credentials(NORTH_INITIATOR_LOGIN, PASSWORD)))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+                .andExpect(jsonPath("$.code").value("CSRF_INVALID"));
     }
 
     @Test

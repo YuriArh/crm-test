@@ -10,6 +10,8 @@ public enum ErrorCode {
     UNAUTHENTICATED(HttpStatus.UNAUTHORIZED, "Authentication required"),
     BAD_CREDENTIALS(HttpStatus.UNAUTHORIZED, "Wrong username or password"),
     FORBIDDEN(HttpStatus.FORBIDDEN, "Access denied"),
+    /** Missing or wrong CSRF token: the client may fetch a fresh token and repeat the call. */
+    CSRF_INVALID(HttpStatus.FORBIDDEN, "Missing or invalid CSRF token"),
     NOT_FOUND(HttpStatus.NOT_FOUND, "Not found"),
     VERSION_CONFLICT(HttpStatus.CONFLICT, "The object was changed by someone else"),
     INVALID_STATE(HttpStatus.CONFLICT, "Action is not allowed in the current state"),

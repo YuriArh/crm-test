@@ -47,6 +47,6 @@ class AuthE2ETest {
                 Map.of("username", "north.initiator", "password", E2eClient.PASSWORD));
 
         assertThat(response.status()).isEqualTo(403);
-        assertThat(response.code()).isEqualTo("FORBIDDEN");
+        assertThat(response.code()).isEqualTo("CSRF_INVALID");
     }
 }

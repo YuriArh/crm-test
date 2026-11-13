@@ -22,6 +22,6 @@ import org.springframework.context.annotation.Import;
 @SpringBootTest(properties = "app.exchange.enabled=false")
 @AutoConfigureMockMvc
 @Import({TestcontainersConfiguration.class, TestClockConfiguration.class, FakeCarrierConfiguration.class,
-        TestRequests.class})
+        TestRequests.class, ContractConfiguration.class})
 public @interface IntegrationTest {
 }

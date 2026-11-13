@@ -19,7 +19,14 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
     testImplementation("org.testcontainers:testcontainers-postgresql")
+    // Checks every response of the integration tests against contracts/dispatch-api.yaml.
+    testImplementation("com.atlassian.oai:openapi-request-validator-mockmvc:3.0.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.test {
+    systemProperty("dispatch.contract", rootProject.file("contracts/dispatch-api.yaml").absolutePath)
+    inputs.file(rootProject.file("contracts/dispatch-api.yaml"))
 }
 
 tasks.bootJar {

@@ -5,7 +5,9 @@ OpenAPI descriptions of the exchange contracts:
 - `carrier-api.yaml` — API of the external carrier: implemented by `carrier-emulator`, called by
   `dispatch`. Also describes the exchange rules (operation identity, idempotent submit, result feed,
   applicability of results, reconciliation) and the emulator's own `admin` endpoints;
-- `dispatch-api.yaml` — API of `dispatch` for the web client (not written yet).
+- `dispatch-api.yaml` — API of `dispatch` for the web client: session and CSRF, access scope, errors,
+  idempotent create, optimistic locking. Every response of the `dispatch` integration tests is checked
+  against it; `web/` generates its TypeScript types from it (`make web-api-types`).
 
 Rules:
 

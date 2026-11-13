@@ -1,0 +1,973 @@
+openapi: 3.1.0
+info:
+  title: Dispatch API
+  version: 1.0.0
+  license:
+    name: Proprietary (test assignment)
+    identifier: LicenseRef-Proprietary
+  description: |
+    API of `dispatch` for the web client (`web/`). The UI and the API share one origin
+    (Vite proxy in development, nginx in Docker), so there is no CORS.
+
+    ## Session and CSRF
+
+    - Sign-in creates a server session (cookie `JSESSIONID`). The session lives in memory: after a
+      restart of `dispatch` every call answers `401` and the user signs in again.
+    - Every mutating call (`POST`, `PATCH`) needs the header `X-XSRF-TOKEN` with the value of the cookie
+      `XSRF-TOKEN`. `GET /api/auth/csrf` sets the cookie. The token changes after login and the cookie is
+      cleared on logout, so the client reads the cookie right before each mutating call.
+    - A missing or wrong token gives `403 CSRF_INVALID` even before authentication is checked; the client
+      fetches a fresh token and may repeat the call. A `403 FORBIDDEN` is a real denial: repeating cannot help.
+
+    ## Access scope
+
+    The scope comes only from the session user, never from parameters. An `INITIATOR` sees and creates
+    own requests; an `OPERATOR` sees all requests of their service and assigns them. A request outside
+    the caller's scope answers `404 NOT_FOUND`, the same as a missing one.
+
+    ## Errors
+
+    Every error is Problem Details (RFC 9457, `application/problem+json`) with a machine-readable `code`.
+    Validation errors of a body carry `errors: [{field, message}]`. Framework errors (`405`, `415`, …)
+    have `code` equal to the HTTP status name, e.g. `METHOD_NOT_ALLOWED`.
+
+    ## Idempotency and concurrent changes
+
+    - `POST /api/requests` needs an `Idempotency-Key` header (client-generated, at most 100 characters,
+      scoped per user). A repeat with the same key and the same body replays the stored response with
+      `Idempotent-Replayed: true` and creates nothing; the same key with another body gives
+      `422 IDEMPOTENCY_KEY_REUSED`.
+    - `PATCH /api/requests/{id}` carries the `version` the client has seen. If the request has changed
+      since, the answer is `409 VERSION_CONFLICT` with the current card in `current`; nothing is
+      overwritten silently.
+
+    ## Time
+
+    Instants are ISO-8601 UTC (`2026-11-12T09:15:03Z`). Dates (`deadline`) are `YYYY-MM-DD` in the
+    business time zone, published by `GET /api/system/info`. A request is overdue when it has no final
+    result and today in the business time zone is after its deadline.
+servers:
+  - url: http://localhost:8080
+    description: Local dispatch
+security:
+  - session: []
+tags:
+  - name: system
+    description: Public information about the running application.
+  - name: auth
+    description: Session sign-in and the current user.
+  - name: users
+    description: Users shown in pickers.
+  - name: requests
+    description: Delivery requests.
+
+paths:
+  /api/system/info:
+    get:
+      tags: [system]
+      operationId: getSystemInfo
+      summary: Application name, server time and business time zone
+      security: []
+      responses:
+        '200':
+          description: Information about the running application.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemInfo'
+              examples:
+                info:
+                  value:
+                    application: dispatch
+                    serverTime: '2026-11-12T09:15:03Z'
+                    businessTimezone: Europe/Moscow
+
+  /api/auth/csrf:
+    get:
+      tags: [auth]
+      operationId: getCsrfToken
+      summary: Issue a CSRF token
+      description: Sets the `XSRF-TOKEN` cookie and returns the same raw token.
+      security: []
+      responses:
+        '200':
+          description: The token and the header to send it in.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CsrfToken'
+              examples:
+                token:
+                  value:
+                    headerName: X-XSRF-TOKEN
+                    token: 3f1c2b4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d
+
+  /api/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Sign in
+      description: |
+        Creates a session (the session id changes) and rotates the CSRF token. Unknown user, wrong password
+        and disabled account all answer the same `401 BAD_CREDENTIALS`.
+      security:
+        - csrf: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              initiator:
+                value:
+                  username: north.initiator
+                  password: demo1234
+      responses:
+        '200':
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+              examples:
+                initiator:
+                  $ref: '#/components/examples/MeInitiator'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          description: Wrong username or password.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                badCredentials:
+                  value:
+                    title: Wrong username or password
+                    status: 401
+                    detail: Wrong username or password
+                    instance: /api/auth/login
+                    code: BAD_CREDENTIALS
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: Sign out
+      security:
+        - session: []
+          csrf: []
+      description: Invalidates the session and clears the CSRF cookie; fetch a new token afterwards.
+      responses:
+        '204':
+          description: Signed out.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/auth/me:
+    get:
+      tags: [auth]
+      operationId: getMe
+      summary: The signed-in user
+      responses:
+        '200':
+          description: The current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+              examples:
+                operator:
+                  $ref: '#/components/examples/MeOperator'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+  /api/users/operators:
+    get:
+      tags: [users]
+      operationId: listOperators
+      summary: Operators of the caller's service
+      description: Enabled operators of the caller's own service — the choices for an assignee. Operators only.
+      responses:
+        '200':
+          description: Operators, possibly none.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserSummary'
+              examples:
+                north:
+                  value:
+                    - id: 0195f3a2-0000-7000-8000-000000000102
+                      username: north.operator
+                      displayName: Оператор (Север)
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/requests:
+    get:
+      tags: [requests]
+      operationId: listRequests
+      summary: Request registry
+      description: A page of the requests in the caller's scope. One value per filter.
+      parameters:
+        - name: businessStatus
+          in: query
+          schema:
+            $ref: '#/components/schemas/BusinessStatus'
+        - name: deliveryStatus
+          in: query
+          schema:
+            $ref: '#/components/schemas/DeliveryStatus'
+        - name: overdue
+          in: query
+          schema:
+            type: boolean
+        - name: page
+          in: query
+          description: Page number, from 0.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: sort
+          in: query
+          description: '`field,asc|desc`; the direction defaults to `asc`.'
+          schema:
+            type: string
+            pattern: '^(createdAt|deadline|number)(,(asc|desc))?$'
+            default: createdAt,desc
+      responses:
+        '200':
+          description: One page of the registry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestPage'
+              examples:
+                onePage:
+                  value:
+                    items:
+                      - id: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60
+                        number: DR-000123
+                        cargoDescription: Паллеты
+                        deadline: '2026-12-01'
+                        businessStatus: AWAITING
+                        deliveryStatus: ACKNOWLEDGED
+                        overdue: false
+                        owner:
+                          id: 0195f3a2-0000-7000-8000-000000000101
+                          displayName: Инициатор (Север)
+                        assignee: null
+                        createdAt: '2026-11-12T09:15:03Z'
+                    page: 0
+                    size: 20
+                    totalElements: 1
+                    totalPages: 1
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+    post:
+      tags: [requests]
+      operationId: createRequest
+      summary: Create a request
+      security:
+        - session: []
+          csrf: []
+      description: |
+        Initiators only. The request is saved and queued for sending to the carrier in one transaction;
+        its content never changes afterwards. The deadline must not be before today in the business time
+        zone.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Client-generated key of this create action (e.g. a UUID), at most 100 characters.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRequest'
+            examples:
+              pallets:
+                value:
+                  cargoDescription: Паллеты
+                  weightKg: 12.5
+                  deliveryAddress: ул. Ленина, 1
+                  deadline: '2026-12-01'
+      responses:
+        '201':
+          description: Created, or the replay of an earlier create with the same key and body.
+          headers:
+            Location:
+              description: URL of the request card.
+              schema:
+                type: string
+            Idempotent-Replayed:
+              description: '`true` when this response was replayed for a repeated `Idempotency-Key`.'
+              schema:
+                type: string
+                enum: ['true', 'false']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestCard'
+              examples:
+                created:
+                  $ref: '#/components/examples/CardNew'
+        '400':
+          description: Invalid body, or no `Idempotency-Key` header (`IDEMPOTENCY_KEY_REQUIRED`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                validationFailed:
+                  $ref: '#/components/examples/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '415':
+          description: The body is not `application/json`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                unsupported:
+                  value:
+                    title: Unsupported Media Type
+                    status: 415
+                    detail: Content-Type 'text/plain;charset=UTF-8' is not supported.
+                    instance: /api/requests
+                    code: UNSUPPORTED_MEDIA_TYPE
+        '422':
+          description: The `Idempotency-Key` was already used with a different body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                keyReused:
+                  value:
+                    title: Idempotency-Key was already used with a different request
+                    status: 422
+                    detail: Idempotency-Key was already used with a different request
+                    instance: /api/requests
+                    code: IDEMPOTENCY_KEY_REUSED
+
+  /api/requests/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id. A malformed id answers `404`, like a missing request.
+        schema:
+          type: string
+    get:
+      tags: [requests]
+      operationId: getRequest
+      summary: Request card
+      description: '`exchange` is present for operators only.'
+      responses:
+        '200':
+          description: The request card.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestCard'
+              examples:
+                succeeded:
+                  $ref: '#/components/examples/CardSucceeded'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [requests]
+      operationId: updateRequest
+      summary: Change the comment and/or the assignee
+      security:
+        - session: []
+          csrf: []
+      description: |
+        A field that is not sent is kept; an explicit `null` clears it. Unknown fields are rejected.
+        Anyone who can see the request may change the comment; only an operator of its service may change
+        the assignee. Sending the current values changes nothing and does not bump `version`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRequest'
+            examples:
+              assign:
+                value:
+                  version: 3
+                  assigneeId: 0195f3a2-0000-7000-8000-000000000102
+              clearComment:
+                value:
+                  version: 3
+                  comment: null
+      responses:
+        '200':
+          description: The card after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestCard'
+              examples:
+                succeeded:
+                  $ref: '#/components/examples/CardSucceeded'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            `VERSION_CONFLICT`: the request was changed by someone else. `current` holds the current card
+            when the conflict is found by the version check.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                versionConflict:
+                  value:
+                    title: The object was changed by someone else
+                    status: 409
+                    detail: Request DR-000123 was changed by someone else
+                    instance: /api/requests/0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60
+                    code: VERSION_CONFLICT
+        '422':
+          description: '`INVALID_ASSIGNEE`: the assignee is not an enabled operator of the same service.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                invalidAssignee:
+                  value:
+                    title: Assignee must be an operator of the same service
+                    status: 422
+                    detail: Assignee must be an operator of the same service
+                    instance: /api/requests/0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60
+                    code: INVALID_ASSIGNEE
+
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: JSESSIONID
+      description: Server session created by `POST /api/auth/login`.
+    csrf:
+      type: apiKey
+      in: header
+      name: X-XSRF-TOKEN
+      description: Value of the `XSRF-TOKEN` cookie; required on every `POST` and `PATCH`.
+
+  responses:
+    ValidationFailed:
+      description: The request is malformed or violates the rules.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            validationFailed:
+              $ref: '#/components/examples/ValidationFailed'
+    Unauthenticated:
+      description: Not signed in, or the session has expired.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            unauthenticated:
+              value:
+                title: Authentication required
+                status: 401
+                detail: Sign in first
+                instance: /api/requests
+                code: UNAUTHENTICATED
+    Forbidden:
+      description: '`CSRF_INVALID` — missing or wrong CSRF token; `FORBIDDEN` — not allowed for the caller''s role.'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            csrf:
+              value:
+                title: Missing or invalid CSRF token
+                status: 403
+                detail: Missing or invalid CSRF token
+                instance: /api/requests
+                code: CSRF_INVALID
+            denied:
+              value:
+                title: Access denied
+                status: 403
+                detail: Only operators can list operators
+                instance: /api/users/operators
+                code: FORBIDDEN
+    NotFound:
+      description: No such request in the caller's scope.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          examples:
+            notFound:
+              value:
+                title: Not found
+                status: 404
+                detail: Request 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60 not found
+                instance: /api/requests/0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60
+                code: NOT_FOUND
+
+  examples:
+    MeInitiator:
+      value:
+        id: 0195f3a2-0000-7000-8000-000000000101
+        username: north.initiator
+        displayName: Инициатор (Север)
+        role: INITIATOR
+        service:
+          id: 0195f3a2-0000-7000-8000-000000000001
+          code: NORTH
+          name: Служба Север
+    MeOperator:
+      value:
+        id: 0195f3a2-0000-7000-8000-000000000102
+        username: north.operator
+        displayName: Оператор (Север)
+        role: OPERATOR
+        service:
+          id: 0195f3a2-0000-7000-8000-000000000001
+          code: NORTH
+          name: Служба Север
+    ValidationFailed:
+      value:
+        title: Validation failed
+        status: 400
+        detail: Some fields are invalid
+        instance: /api/requests
+        code: VALIDATION_FAILED
+        errors:
+          - field: weightKg
+            message: must be between 0.1 and 20000 kg
+    CardNew:
+      summary: Just created, as an initiator sees it
+      value:
+        id: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60
+        number: DR-000123
+        cargoDescription: Паллеты
+        weightKg: 12.5
+        deliveryAddress: ул. Ленина, 1
+        deadline: '2026-12-01'
+        comment: null
+        owner:
+          id: 0195f3a2-0000-7000-8000-000000000101
+          displayName: Инициатор (Север)
+        assignee: null
+        businessStatus: AWAITING
+        result: null
+        deliveryStatus: PENDING
+        operationId: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f
+        overdue: false
+        createdAt: '2026-11-12T09:15:03Z'
+        updatedAt: '2026-11-12T09:15:03Z'
+        version: 0
+    CardSucceeded:
+      summary: Delivered, as an operator sees it
+      value:
+        id: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60
+        number: DR-000123
+        cargoDescription: Паллеты
+        weightKg: 12.5
+        deliveryAddress: ул. Ленина, 1
+        deadline: '2026-12-01'
+        comment: Позвонить за час
+        owner:
+          id: 0195f3a2-0000-7000-8000-000000000101
+          displayName: Инициатор (Север)
+        assignee:
+          id: 0195f3a2-0000-7000-8000-000000000102
+          displayName: Оператор (Север)
+        businessStatus: SUCCEEDED
+        result:
+          trackingNumber: TRK-3F1C2B4D
+          price: 612.5
+          rejectionReason: null
+          resultAt: '2026-11-12T09:15:09Z'
+        deliveryStatus: ACKNOWLEDGED
+        operationId: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f
+        overdue: false
+        createdAt: '2026-11-12T09:15:03Z'
+        updatedAt: '2026-11-12T09:16:00Z'
+        version: 3
+        exchange:
+          attempts: 1
+          nextAttemptAt: null
+          lastError: null
+          acknowledgedAt: '2026-11-12T09:15:04Z'
+          acknowledgedVia: RESPONSE
+
+  schemas:
+    Problem:
+      type: object
+      description: |
+        Problem Details (RFC 9457) with the project's `code`. `type` is omitted when it is `about:blank`.
+      required: [title, status, code]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+          description: |
+            Machine-readable error code: `VALIDATION_FAILED`, `IDEMPOTENCY_KEY_REQUIRED`,
+            `IDEMPOTENCY_KEY_REUSED`, `UNAUTHENTICATED`, `BAD_CREDENTIALS`, `FORBIDDEN`, `CSRF_INVALID`, `NOT_FOUND`,
+            `VERSION_CONFLICT`, `INVALID_STATE`, `INVALID_ASSIGNEE`, `INTERNAL_ERROR`, or the HTTP status
+            name for framework errors.
+        errors:
+          type: array
+          description: Field errors of `VALIDATION_FAILED` for a body.
+          items:
+            $ref: '#/components/schemas/FieldError'
+        current:
+          $ref: '#/components/schemas/RequestCard'
+          description: The current card, on `VERSION_CONFLICT` of a request.
+
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+
+    SystemInfo:
+      type: object
+      required: [application, serverTime, businessTimezone]
+      properties:
+        application:
+          type: string
+        serverTime:
+          type: string
+          format: date-time
+        businessTimezone:
+          type: string
+          description: IANA time zone id used for dates, deadlines and overdue.
+
+    CsrfToken:
+      type: object
+      required: [headerName, token]
+      properties:
+        headerName:
+          type: string
+        token:
+          type: string
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+
+    Role:
+      type: string
+      enum: [INITIATOR, OPERATOR]
+
+    Me:
+      type: object
+      required: [id, username, displayName, role, service]
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        displayName:
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+        service:
+          $ref: '#/components/schemas/ServiceRef'
+
+    ServiceRef:
+      type: object
+      required: [id, code, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+
+    UserSummary:
+      type: object
+      required: [id, username, displayName]
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        displayName:
+          type: string
+
+    PersonRef:
+      type: object
+      required: [id, displayName]
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+
+    BusinessStatus:
+      type: string
+      enum: [AWAITING, IN_PROGRESS, SUCCEEDED, REJECTED]
+      description: |
+        Business result reported by the carrier. `AWAITING` — no result yet; `IN_PROGRESS` — taken into
+        work; `SUCCEEDED` and `REJECTED` are final.
+
+    DeliveryStatus:
+      type: string
+      enum: [PENDING, SENDING, RETRY_WAIT, UNKNOWN, ACKNOWLEDGED, FAILED]
+      description: |
+        Whether the request reached the carrier (receipt is not execution). `PENDING` — waiting to be
+        sent; `SENDING` — being sent; `RETRY_WAIT` — temporary error, waiting for the next attempt;
+        `UNKNOWN` — no answer after sending, unknown whether the carrier got it; `ACKNOWLEDGED` — the
+        carrier confirmed receipt; `FAILED` — permanent error or attempts exhausted.
+
+    RequestListItem:
+      type: object
+      required: [id, number, cargoDescription, deadline, businessStatus, deliveryStatus, overdue, owner,
+                 assignee, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          description: Human-readable number, e.g. `DR-000123`.
+        cargoDescription:
+          type: string
+        deadline:
+          type: string
+          format: date
+        businessStatus:
+          $ref: '#/components/schemas/BusinessStatus'
+        deliveryStatus:
+          $ref: '#/components/schemas/DeliveryStatus'
+        overdue:
+          type: boolean
+        owner:
+          $ref: '#/components/schemas/PersonRef'
+        assignee:
+          oneOf:
+            - $ref: '#/components/schemas/PersonRef'
+            - type: 'null'
+        createdAt:
+          type: string
+          format: date-time
+
+    RequestPage:
+      type: object
+      required: [items, page, size, totalElements, totalPages]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RequestListItem'
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+
+    CreateRequest:
+      type: object
+      required: [cargoDescription, weightKg, deliveryAddress, deadline]
+      properties:
+        cargoDescription:
+          type: string
+          minLength: 1
+          maxLength: 200
+        weightKg:
+          type: number
+          minimum: 0.1
+          maximum: 20000
+          description: Kilograms, at most one decimal place.
+        deliveryAddress:
+          type: string
+          minLength: 1
+          maxLength: 500
+        deadline:
+          type: string
+          format: date
+          description: Not before today in the business time zone.
+
+    UpdateRequest:
+      type: object
+      additionalProperties: false
+      description: Send `version` and at least one of `assigneeId`, `comment`.
+      required: [version]
+      properties:
+        version:
+          type: integer
+          format: int64
+          minimum: 0
+        assigneeId:
+          type: [string, 'null']
+          format: uuid
+          description: Operator of the request's service; `null` removes the assignee.
+        comment:
+          type: [string, 'null']
+          maxLength: 2000
+          description: Stored stripped; an empty string or `null` removes the comment.
+
+    BusinessResult:
+      type: object
+      description: '`SUCCEEDED` has `trackingNumber` and `price`; `REJECTED` has `rejectionReason`.'
+      required: [trackingNumber, price, rejectionReason, resultAt]
+      properties:
+        trackingNumber:
+          type: [string, 'null']
+        price:
+          type: [number, 'null']
+          description: Rubles.
+        rejectionReason:
+          type: [string, 'null']
+        resultAt:
+          type: [string, 'null']
+          format: date-time
+
+    ExchangeInfo:
+      type: object
+      description: Technical exchange state; operators only.
+      required: [attempts, nextAttemptAt, lastError, acknowledgedAt, acknowledgedVia]
+      properties:
+        attempts:
+          type: integer
+          description: Send attempts made so far.
+        nextAttemptAt:
+          type: [string, 'null']
+          format: date-time
+        lastError:
+          type: [string, 'null']
+        acknowledgedAt:
+          type: [string, 'null']
+          format: date-time
+        acknowledgedVia:
+          description: How receipt became known.
+          oneOf:
+            - type: string
+              enum: [RESPONSE, RESULT, RECONCILIATION]
+            - type: 'null'
+
+    RequestCard:
+      type: object
+      required: [id, number, cargoDescription, weightKg, deliveryAddress, deadline, comment, owner, assignee,
+                 businessStatus, result, deliveryStatus, operationId, overdue, createdAt, updatedAt, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        cargoDescription:
+          type: string
+        weightKg:
+          type: number
+        deliveryAddress:
+          type: string
+        deadline:
+          type: string
+          format: date
+        comment:
+          type: [string, 'null']
+        owner:
+          $ref: '#/components/schemas/PersonRef'
+        assignee:
+          oneOf:
+            - $ref: '#/components/schemas/PersonRef'
+            - type: 'null'
+        businessStatus:
+          $ref: '#/components/schemas/BusinessStatus'
+        result:
+          description: '`null` until the carrier reports a final result.'
+          oneOf:
+            - $ref: '#/components/schemas/BusinessResult'
+            - type: 'null'
+        deliveryStatus:
+          $ref: '#/components/schemas/DeliveryStatus'
+        operationId:
+          type: string
+          format: uuid
+          description: Immutable business operation identity used in the exchange with the carrier.
+        overdue:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          format: int64
+          description: Send it back in `PATCH`.
+        exchange:
+          $ref: '#/components/schemas/ExchangeInfo'

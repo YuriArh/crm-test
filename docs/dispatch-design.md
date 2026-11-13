@@ -33,7 +33,7 @@
   - REST + JSON под `/api`, без HATEOAS;
   - ошибки в формате Problem Details (RFC 9457) с машинным кодом, ошибки валидации — по полям;
   - конфликт версии — `409 VERSION_CONFLICT`, недопустимое действие в текущем состоянии — `409 INVALID_STATE`;
-  - коды ошибок: `VALIDATION_FAILED` (400, `errors[]` по полям), `IDEMPOTENCY_KEY_REQUIRED` (400), `IDEMPOTENCY_KEY_REUSED` (422), `UNAUTHENTICATED` (401), `BAD_CREDENTIALS` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `VERSION_CONFLICT` (409, с полем `current`), `INVALID_STATE` (409), `INVALID_ASSIGNEE` (422), `INTERNAL_ERROR` (500);
+  - коды ошибок: `VALIDATION_FAILED` (400, `errors[]` по полям), `IDEMPOTENCY_KEY_REQUIRED` (400), `IDEMPOTENCY_KEY_REUSED` (422), `UNAUTHENTICATED` (401), `BAD_CREDENTIALS` (401), `FORBIDDEN` (403), `CSRF_INVALID` (403, нет или неверный CSRF-токен — клиент берёт новый и повторяет), `NOT_FOUND` (404), `VERSION_CONFLICT` (409, с полем `current`), `INVALID_STATE` (409), `INVALID_ASSIGNEE` (422), `INTERNAL_ERROR` (500);
   - 401 и 403 из цепочки безопасности тоже отдаются как Problem Details, без перенаправлений.
 
 ## 2. Пользователи и права (NF02)

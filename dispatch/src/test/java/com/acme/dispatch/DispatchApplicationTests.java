@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.UUID;
 
 import com.acme.dispatch.auth.AppUserRepository;
+import com.acme.dispatch.support.Contract;
 import com.acme.dispatch.support.IntegrationTest;
 
 import org.junit.jupiter.api.Test;
@@ -54,6 +55,7 @@ class DispatchApplicationTests {
     @Test
     void unsupportedMethodHasACode() throws Exception {
         mockMvc.perform(delete("/api/requests/" + UUID.randomUUID())
+                        .header(Contract.SKIP_HEADER, "method not in the contract on purpose")
                         .with(asUser(users, NORTH_INITIATOR_LOGIN)).with(csrf()))
                 .andExpect(status().isMethodNotAllowed())
                 .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"))
@@ -71,7 +73,8 @@ class DispatchApplicationTests {
 
     @Test
     void unknownPathHasACode() throws Exception {
-        mockMvc.perform(get("/api/nothing-here").with(asUser(users, NORTH_INITIATOR_LOGIN)))
+        mockMvc.perform(get("/api/nothing-here").with(asUser(users, NORTH_INITIATOR_LOGIN))
+                        .header(Contract.SKIP_HEADER, "path not in the contract on purpose"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("NOT_FOUND"))
                 .andExpect(jsonPath("$.detail").value("Not found"));
