@@ -2,7 +2,7 @@
 -include .env
 export
 
-.PHONY: help up down reset logs logs-carrier ps db build test run wait e2e contracts-lint carrier-ops \
+.PHONY: help up down reset logs logs-carrier ps db build test run wait e2e seed contracts-lint carrier-ops \
         web-install web-dev web-build web-test web-e2e web-api-types
 
 REDOCLY_IMAGE := redocly/cli:1.34.3
@@ -52,6 +52,9 @@ wait: ## Wait until dispatch and carrier-emulator report healthy (up to 90 s eac
 
 e2e: wait ## Run end-to-end tests against the running stack (start it with make up)
 	E2E_BASE_URL=$(E2E_BASE_URL) CARRIER_BASE_URL=$(CARRIER_BASE_URL) ./gradlew :e2e:test -Pe2e
+
+seed: wait ## Create demo requests through the API (safe to re-run; start the stack with make up)
+	./scripts/seed.sh $(E2E_BASE_URL)
 
 carrier-ops: ## Show carrier-emulator operations with execution counters (newest 100)
 	@curl -sf $(CARRIER_BASE_URL)/admin/operations || echo "carrier-emulator is not reachable at $(CARRIER_BASE_URL)"
