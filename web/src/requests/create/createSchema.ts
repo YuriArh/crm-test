@@ -9,7 +9,7 @@ export const ADDRESS_MAX = 500;
 export const WEIGHT_MIN = 0.1;
 export const WEIGHT_MAX = 20_000;
 
-/** What the form holds: `NumberInput` gives a number, or a string while the input is empty or incomplete. */
+/** What the form holds. The weight is the text as typed (comma or dot); a number is accepted too. */
 export type CreateFormValues = {
   cargoDescription: string;
   weightKg: number | string;

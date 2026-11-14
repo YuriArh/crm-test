@@ -1,23 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { signInViaApi } from '../auth/helpers';
-
-/** Today's date in Moscow (the stand's business zone) as `D MMMM YYYY` in Russian, the calendar's day label. */
-function dayLabel(offsetDays = 0): string {
-  const [year, month, day] = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Moscow',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  })
-    .format(new Date())
-    .split('-')
-    .map(Number);
-  const date = new Date(Date.UTC(year!, month! - 1, day! + offsetDays));
-  const monthName = new Intl.DateTimeFormat('ru-RU', { month: 'long', day: 'numeric', timeZone: 'UTC' })
-    .format(date)
-    .split(' ')[1];
-  return `${date.getUTCDate()} ${monthName} ${date.getUTCFullYear()}`;
-}
+import { dayLabel } from './create-page';
 
 test.describe('create request form', () => {
   test('an initiator opens the form and the empty form is not sent', async ({ page }) => {

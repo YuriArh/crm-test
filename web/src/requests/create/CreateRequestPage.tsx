@@ -1,11 +1,36 @@
-import { Anchor, Button, Group, NumberInput, SimpleGrid, Stack, Text, Textarea, TextInput, Title } from '@mantine/core';
+import {
+  Alert,
+  Anchor,
+  Button,
+  Group,
+  SimpleGrid,
+  Stack,
+  Text,
+  Textarea,
+  TextInput,
+  Title,
+} from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
+import { notifications } from '@mantine/notifications';
 import { IconArrowLeft, IconCalendar, IconInfoCircle } from '@tabler/icons-react';
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { useState } from 'react';
+import { isApiError, isTransient, type CreateRequest } from '@/shared/api';
 import { todayIn, useBusinessTimezone } from '@/shared/system';
+import { useCreateRequest } from './api';
+import { ConfirmCreateModal } from './ConfirmCreateModal';
 import classes from './CreateRequestPage.module.css';
-import { ADDRESS_MAX, CARGO_MAX, EMPTY_FORM, validateCreate, type CreateFormValues } from './createSchema';
+import {
+  ADDRESS_MAX,
+  CARGO_MAX,
+  EMPTY_FORM,
+  serverFieldErrors,
+  toCreateRequest,
+  validateCreate,
+  type CreateFormValues,
+} from './createSchema';
+import { useIdempotencyKeys } from './idempotency';
 
 /**
  * A label with the character counter on its right, `Груз … 12/200` (red once over the limit). The
@@ -37,9 +62,42 @@ export function CreateRequestPage() {
     validate: (values) => validateCreate(values, todayIn(timeZone)),
   });
 
-  const submit = form.onSubmit(() => {
-    // The confirmation and sending come in the next step.
+  const navigate = useNavigate();
+  const keys = useIdempotencyKeys();
+  const create = useCreateRequest();
+  const [confirming, setConfirming] = useState(false);
+  const [body, setBody] = useState<CreateRequest | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  // A valid form opens «Проверьте данные» with the body exactly as it will be sent.
+  const submit = form.onSubmit((valid) => {
+    setFormError(null);
+    setBody(toCreateRequest(valid));
+    setConfirming(true);
   });
+
+  const confirm = () => {
+    if (!body || create.isPending) return;
+    create.mutate(
+      { body, idempotencyKey: keys.keyFor(body) },
+      {
+        onSuccess: (card) => {
+          notifications.show({ color: 'green', message: `Заявка ${card.number} создана` });
+          void navigate({ to: '/requests/$id', params: { id: card.id } });
+        },
+        onError: (error) => {
+          setConfirming(false);
+          if (isApiError(error, 'IDEMPOTENCY_KEY_REUSED')) keys.renew(body);
+          if (isApiError(error, 'VALIDATION_FAILED')) {
+            const fieldErrors = serverFieldErrors(error.fieldErrors);
+            form.setErrors(fieldErrors);
+            if (Object.keys(fieldErrors).length > 0) return;
+          }
+          setFormError(describeCreateError(error));
+        },
+      },
+    );
+  };
 
   const { values } = form;
 
@@ -66,16 +124,16 @@ export function CreateRequestPage() {
             {...form.getInputProps('cargoDescription')}
           />
           <SimpleGrid cols={{ base: 1, xs: 2 }} spacing="md" verticalSpacing="md">
-            <NumberInput
+            {/*
+              A text field, not NumberInput: NumberInput with a comma separator drops a dot that arrives
+              by paste or autofill ("120.5" → 1205). parseWeight takes a comma or a dot; inputMode opens
+              the numeric keyboard on phones.
+            */}
+            <TextInput
               label="Вес, кг"
               placeholder="0,0"
               inputMode="decimal"
-              decimalSeparator=","
-              allowedDecimalSeparators={['.', ',']}
-              decimalScale={1}
-              allowNegative={false}
-              step={0.1}
-              hideControls
+              autoComplete="off"
               rightSection={
                 <Text size="sm" c="dimmed">
                   кг
@@ -111,6 +169,12 @@ export function CreateRequestPage() {
             </Text>
           </Group>
 
+          {formError && (
+            <Alert color="red" role="alert">
+              {formError}
+            </Alert>
+          )}
+
           <Group justify="flex-end" gap="sm">
             <Button variant="default" component={Link} to="/requests">
               Отмена
@@ -119,6 +183,30 @@ export function CreateRequestPage() {
           </Group>
         </Stack>
       </form>
+
+      <ConfirmCreateModal
+        opened={confirming}
+        body={body}
+        sending={create.isPending}
+        onEdit={() => setConfirming(false)}
+        onConfirm={confirm}
+      />
     </Stack>
   );
+}
+
+/**
+ * The message above the buttons; field errors go under the fields. `401` is handled by the app (sign in
+ * again), so it gets no message here.
+ */
+function describeCreateError(error: Error): string | null {
+  if (isTransient(error)) {
+    // The outcome is unknown; a repeat sends the same Idempotency-Key, so it never makes a second request.
+    return 'Не удалось создать заявку. Проверьте связь и повторите.';
+  }
+  if (isApiError(error, 'UNAUTHENTICATED')) return null;
+  if (isApiError(error, 'IDEMPOTENCY_KEY_REUSED')) return 'Повторите отправку.';
+  if (isApiError(error) && error.status === 403) return 'Создавать заявки может только инициатор.';
+  if (isApiError(error, 'VALIDATION_FAILED')) return 'Проверьте поля формы.';
+  return 'Не удалось создать заявку. Повторите попытку.';
 }
