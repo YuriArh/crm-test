@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.util.UUID;
 
 import com.acme.carrier.execution.Executor;
+import com.acme.carrier.support.Feed;
 import com.acme.carrier.support.IntegrationTest;
 import com.acme.carrier.support.TestRows;
 
@@ -99,9 +100,7 @@ class FeedTests {
                 .andExpect(jsonPath("$.message").value("after: has a wrong format"));
     }
 
-    /** The feed sequence is not reset when rows are deleted, so each test reads after its current value. */
     private long lastSeq() {
-        return jdbc.sql("SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM feed_entry_feed_seq_seq")
-                .query(Long.class).single();
+        return Feed.lastSeq(jdbc);
     }
 }

@@ -269,13 +269,22 @@ paths:
       operationId: setFaults
       summary: Set fault modes
       description: |
-        Switches fault modes on or off. Modes live in memory: after an emulator restart all are off.
-        - `unavailable` — exchange endpoints answer `503`;
-        - `loseResponse` — a submit is received and stored, but the response is delayed beyond the
-          client timeout (default 10 s);
-        - `duplicate` — every result is published to the feed twice with the same `messageId`;
-        - `delayed` — the final result is published after a delay (default 60 s) and the `IN_PROGRESS`
-          entry only after it, so it arrives stale.
+        Switches fault modes on or off; the body always carries all four. Modes live in memory: after an
+        emulator restart all are off. Delays are set in the emulator configuration, not here.
+        - `unavailable` — the exchange endpoints (`POST /operations`, `GET /operations/{operationId}`,
+          `GET /results`) answer `503` without reading the request; operations already received are still
+          executed and published;
+        - `loseResponse` — applies to the **first** submit of an operation only: it is stored, the response
+          waits until the operation is executed and is then held until the delay (default 10 s) has passed.
+          The delay must exceed the client's response timeout, so the client sees a lost response after
+          execution. Repeats, `400` and `409` answer at once;
+        - `duplicate` — every feed entry of the operation is published twice with the same `messageId`;
+        - `delayed` — the operation is executed at once (and `GET /operations/{operationId}` shows its result),
+          but its feed entries are published after a delay (default 60 s): the final result first, then
+          `IN_PROGRESS`, which therefore arrives stale.
+
+        `duplicate` and `delayed` are remembered by an operation when it is first received: an operation
+        received while the mode was on is affected even if the mode is switched off before it is executed.
       requestBody:
         required: true
         content:
@@ -346,6 +355,8 @@ paths:
                           occurredAt: '2026-11-12T09:15:03Z'
                         receivedCount: 3
                         executionCount: 1
+                        faults: []
+                        resultPublishAt: null
         '400':
           $ref: '#/components/responses/ValidationFailed'
 
@@ -443,7 +454,9 @@ components:
           type: [string, 'null']
           format: date-time
         result:
-          description: Latest result published for the operation, or `null` if none yet.
+          description: |
+            Final result of the operation, or `null` while it is not executed. With the `delayed` fault mode
+            it is shown here before it appears in the feed (same `messageId`).
           oneOf:
             - $ref: '#/components/schemas/OperationResult'
             - type: 'null'
@@ -538,7 +551,7 @@ components:
       type: object
       description: Operation state (see `OperationState`) with its content and execution counters.
       required: [operationId, cargoDescription, weightKg, deliveryAddress, deadline, state, receivedAt, executedAt,
-                 result, receivedCount, executionCount]
+                 result, receivedCount, executionCount, faults, resultPublishAt]
       properties:
         operationId:
           $ref: '#/components/schemas/OperationState/properties/operationId'
@@ -566,7 +579,20 @@ components:
           type: integer
           minimum: 0
           maximum: 1
-          description: How many times the operation was actually executed; never more than 1.
+          description: |
+            How many times the operation was actually executed: derived from `state` (`ACCEPTED` — 0,
+            `EXECUTED` — 1); never more than 1.
+        faults:
+          type: array
+          description: Fault modes remembered by the operation when it was first received.
+          uniqueItems: true
+          items:
+            type: string
+            enum: [DUPLICATE, DELAYED]
+        resultPublishAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the delayed feed entries will be published; `null` if nothing is waiting.
 
     Error:
       type: object

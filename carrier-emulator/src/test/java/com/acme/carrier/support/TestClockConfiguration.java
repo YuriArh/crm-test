@@ -1,14 +1,15 @@
 package com.acme.carrier.support;
 
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 
-/** A fixed clock, so stored instants are predictable. */
+/**
+ * A {@link MutableClock} starting at {@link #NOW}, so stored instants are predictable. The context is shared,
+ * so a test that moves the clock resets it with {@link TestRows#resetState}.
+ */
 @TestConfiguration(proxyBeanMethods = false)
 public class TestClockConfiguration {
 
@@ -16,7 +17,7 @@ public class TestClockConfiguration {
 
     @Bean
     @Primary
-    Clock testClock() {
-        return Clock.fixed(NOW, ZoneOffset.UTC);
+    MutableClock testClock() {
+        return new MutableClock(NOW);
     }
 }

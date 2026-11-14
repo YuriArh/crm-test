@@ -26,6 +26,10 @@ management:
 
 carrier:
   executor-enabled: ${CARRIER_EXECUTOR_ENABLED:true}
+  faults:
+    # Must exceed the client's response timeout (dispatch: 5 s), or the response is not lost.
+    lose-response-delay: ${CARRIER_LOSE_RESPONSE_DELAY:10s}
+    delayed-result-delay: ${CARRIER_DELAYED_RESULT_DELAY:60s}
 
 logging:
   level:

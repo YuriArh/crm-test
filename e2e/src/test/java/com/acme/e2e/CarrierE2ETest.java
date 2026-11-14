@@ -19,7 +19,7 @@ class CarrierE2ETest {
 
     @Test
     void operationIsExecutedOnceAndItsResultAppearsInTheFeed() {
-        long cursor = feedEnd();
+        long cursor = carrier.feedEnd();
         Map<String, Object> body = body(UUID.randomUUID(), 12.5, "Main st 1");
         String id = (String) body.get("operationId");
 
@@ -34,14 +34,12 @@ class CarrierE2ETest {
 
         // A repeat (e.g. after a lost response) is received again but not executed again.
         assertThat(carrier.post("/operations", body).status()).isEqualTo(202);
-        JsonNode operation = adminOperation(id);
+        JsonNode operation = carrier.adminOperation(id);
         assertThat(operation.get("receivedCount").asInt()).isEqualTo(2);
         assertThat(operation.get("executionCount").asInt()).isEqualTo(1);
 
         // The feed after our cursor has IN_PROGRESS, then the final result, for this operation.
-        JsonNode items = carrier.get("/results?after=" + cursor).body().get("items");
-        assertThat(items.valueStream()
-                .filter(item -> item.get("operationId").asString().equals(id))
+        assertThat(carrier.feedEntries(cursor, id).stream()
                 .map(item -> item.get("sequence").asInt() + ":" + item.get("status").asString()))
                 .containsExactly("1:IN_PROGRESS", "2:SUCCEEDED");
     }
@@ -89,24 +87,6 @@ class CarrierE2ETest {
             sleep();
         }
         throw new AssertionError("No final result for " + operationId + " within 15 s");
-    }
-
-    private JsonNode adminOperation(String operationId) {
-        JsonNode items = carrier.get("/admin/operations?operationId=" + operationId).body().get("items");
-        assertThat(items.size()).isEqualTo(1);
-        return items.get(0);
-    }
-
-    /** Last feedSeq right now: the database is not empty, so tests read only what comes after. */
-    private long feedEnd() {
-        long after = 0;
-        while (true) {
-            JsonNode items = carrier.get("/results?limit=100&after=" + after).body().get("items");
-            if (items.isEmpty()) {
-                return after;
-            }
-            after = items.get(items.size() - 1).get("feedSeq").asLong();
-        }
     }
 
     private static Map<String, Object> body(UUID operationId, Number weight, String address) {
