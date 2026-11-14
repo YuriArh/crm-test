@@ -1,13 +1,21 @@
-import { Alert, Button, Center, Paper, PasswordInput, Stack, Text, TextInput, Title } from '@mantine/core';
+import { Alert, Button, PasswordInput, Stack, Text, TextInput, Title } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { getRouteApi, useRouter } from '@tanstack/react-router';
 import { ApiError, NetworkError } from '@/shared/api';
+import { BrandMark } from '@/shared/ui/BrandMark';
+import { ColorSchemeToggle } from '@/shared/ui/ColorSchemeToggle';
 import { useLogin } from './api';
+import classes from './LoginPage.module.css';
 import { safeNext } from './safeNext';
 
 const loginRouteApi = getRouteApi('/login');
 
-const DEMO_LOGINS = ['north.initiator', 'north.operator', 'south.initiator'];
+/** Demo accounts of the stand (V5__demo_users.sql); one shared password. */
+const DEMO_USERS = [
+  { username: 'north.initiator', role: 'Инициатор · Север' },
+  { username: 'south.initiator', role: 'Инициатор · Юг' },
+  { username: 'north.operator', role: 'Оператор · Север' },
+] as const;
 const DEMO_PASSWORD = 'demo1234';
 
 type LoginValues = { username: string; password: string };
@@ -51,14 +59,35 @@ export function LoginPage() {
     );
   });
 
+  const fillDemo = (username: string) => {
+    form.setValues({ username, password: DEMO_PASSWORD });
+    form.clearErrors();
+    login.reset();
+  };
+
   const message = login.isError ? describeLoginError(login.error) : undefined;
 
   return (
-    <Center mih="100vh" p="md">
-      <Paper withBorder shadow="sm" p="lg" radius="md" w={380} maw="100%">
+    <main className={classes.page}>
+      <div className={classes.corner}>
+        <ColorSchemeToggle />
+      </div>
+
+      <Stack className={classes.column} gap="xl">
+        <Stack gap="md" align="center" ta="center">
+          <BrandMark size={40} />
+          <Stack gap={6}>
+            <Title order={1} size="h2">
+              Вход
+            </Title>
+            <Text size="lg" className={classes.subtitle}>
+              Dispatch — заявки на доставку и обмен с перевозчиком
+            </Text>
+          </Stack>
+        </Stack>
+
         <form onSubmit={submit} noValidate>
-          <Stack>
-            <Title order={2}>Вход</Title>
+          <Stack gap="lg">
             {message && (
               <Alert color="red" role="alert">
                 {message}
@@ -66,21 +95,43 @@ export function LoginPage() {
             )}
             <TextInput
               label="Логин"
+              size="md"
               autoComplete="username"
+              placeholder="north.initiator"
               data-autofocus
               {...form.getInputProps('username')}
             />
-            <PasswordInput label="Пароль" autoComplete="current-password" {...form.getInputProps('password')} />
-            <Button type="submit" loading={login.isPending}>
+            <PasswordInput
+              label="Пароль"
+              size="md"
+              autoComplete="current-password"
+              {...form.getInputProps('password')}
+            />
+            <Button type="submit" size="md" fullWidth loading={login.isPending}>
               Войти
             </Button>
-            <Text size="sm" c="dimmed">
-              Демо-пользователи: {DEMO_LOGINS.join(', ')}. Пароль: {DEMO_PASSWORD}.
-            </Text>
           </Stack>
         </form>
-      </Paper>
-    </Center>
+
+        <Stack gap="sm" className={classes.demo}>
+          <Text size="sm" c="dimmed">
+            Демо-пользователи, пароль у всех {DEMO_PASSWORD}:
+          </Text>
+          {DEMO_USERS.map((user) => (
+            <Button
+              key={user.username}
+              variant="default"
+              fullWidth
+              classNames={{ inner: classes.demoUser }}
+              rightSection={<span className={classes.demoRole}>{user.role}</span>}
+              onClick={() => fillDemo(user.username)}
+            >
+              {user.username}
+            </Button>
+          ))}
+        </Stack>
+      </Stack>
+    </main>
   );
 }
 

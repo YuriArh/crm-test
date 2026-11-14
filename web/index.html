@@ -1,9 +1,21 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-mantine-color-scheme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
     <title>Dispatch</title>
+    <!-- Mantine's ColorSchemeScript for an SPA: apply the saved scheme before the first paint (dark by default). -->
+    <script>
+      try {
+        var saved = window.localStorage.getItem('mantine-color-scheme-value');
+        var scheme = saved === 'light' || saved === 'dark' || saved === 'auto' ? saved : 'dark';
+        if (scheme === 'auto') {
+          scheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        document.documentElement.setAttribute('data-mantine-color-scheme', scheme);
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

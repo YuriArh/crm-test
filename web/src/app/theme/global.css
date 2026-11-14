@@ -1,0 +1,35 @@
+/* App-wide CSS on top of Mantine's styles: fonts and typographic details of the design system. */
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+
+:root {
+  /* Inter's alternates that make it read like Linear's UI type: single-storey a, open digits. */
+  font-feature-settings:
+    'cv01' 1,
+    'cv11' 1,
+    'ss03' 1;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  letter-spacing: -0.006em;
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: -0.022em;
+}
+
+::selection {
+  background-color: var(--app-color-focus-ring);
+}
+
+/* Native controls (scrollbars, date pickers) follow the active scheme. */
+[data-mantine-color-scheme='dark'] {
+  color-scheme: dark;
+}
+
+[data-mantine-color-scheme='light'] {
+  color-scheme: light;
+}

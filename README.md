@@ -161,6 +161,8 @@ make web-e2e       # Playwright: against the dev server, then against the stack 
 ```
 
 - Stack: React 19, TypeScript (strict), Vite, TanStack Router, TanStack Query, Mantine; pnpm project outside Gradle.
+- Design system in the spirit of Linear (dark by default, light scheme behind the switch in the header):
+  tokens, Mantine theme and rules in `docs/design-system.md`.
 - Modular structure: `src/app/` wires the app (query client, router, theme), `src/shared/` holds code used by
   several modules, each feature module gets its own folder (and its own `e2e/<module>/` folder).
 - Data layer `src/shared/api/`: types generated from `contracts/dispatch-api.yaml`, one HTTP client with the

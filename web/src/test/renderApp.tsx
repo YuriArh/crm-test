@@ -1,9 +1,7 @@
-import { MantineProvider } from '@mantine/core';
-import { QueryClientProvider } from '@tanstack/react-query';
-import { createMemoryHistory, RouterProvider } from '@tanstack/react-router';
+import { createMemoryHistory } from '@tanstack/react-router';
 import { render } from '@testing-library/react';
+import { AppProviders } from '@/app/AppProviders';
 import { createApp } from '@/app/createApp';
-import { theme } from '@/app/theme';
 import { meKey } from '@/auth/keys';
 import type { Me } from '@/shared/api';
 
@@ -16,12 +14,6 @@ export function renderApp(path: string, { me }: { me: Me | null }) {
   const { queryClient, router } = createApp({ history });
   queryClient.setQueryData(meKey, me);
 
-  render(
-    <MantineProvider theme={theme}>
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>
-    </MantineProvider>,
-  );
+  render(<AppProviders queryClient={queryClient} router={router} />);
   return { queryClient, router, history };
 }

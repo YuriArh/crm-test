@@ -1,0 +1,41 @@
+.page {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--mantine-spacing-xl) var(--mantine-spacing-lg);
+  overflow: hidden;
+  /* A faint accent glow from the top, fading out above the form: the only decoration on the page. */
+  background: radial-gradient(70% 55% at 50% 0%, var(--app-color-glow), transparent);
+}
+
+.corner {
+  position: absolute;
+  top: var(--mantine-spacing-lg);
+  right: var(--mantine-spacing-lg);
+}
+
+.column {
+  position: relative;
+  width: 100%;
+  max-width: 22.5rem;
+}
+
+.subtitle {
+  color: var(--app-color-text-tertiary);
+}
+
+.demo {
+  border-top: 1px solid var(--app-color-border);
+  padding-top: var(--mantine-spacing-lg);
+}
+
+.demoUser {
+  justify-content: space-between;
+}
+
+.demoRole {
+  color: var(--app-color-text-tertiary);
+  font-weight: 400;
+}

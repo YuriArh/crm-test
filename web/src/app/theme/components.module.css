@@ -1,0 +1,58 @@
+/* Styles of Mantine components that the theme cannot express with props or component variables. */
+
+.button {
+  font-weight: 510;
+  letter-spacing: -0.006em;
+}
+
+.header {
+  background-color: var(--mantine-color-body);
+  border-bottom-color: var(--app-color-border);
+}
+
+.input {
+  background-color: var(--mantine-color-default);
+  border-color: var(--app-color-border);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+
+  &:hover:not(:focus, :focus-within, [data-disabled], [data-error]) {
+    border-color: var(--app-color-border-strong);
+  }
+
+  &:focus,
+  &:focus-within {
+    border-color: var(--mantine-color-accent-6);
+    box-shadow: 0 0 0 3px var(--app-color-focus-ring);
+    outline: none;
+  }
+
+  &[data-error] {
+    border-color: var(--mantine-color-error);
+  }
+
+  &::placeholder {
+    color: var(--mantine-color-placeholder);
+  }
+}
+
+.label {
+  color: var(--app-color-text-secondary);
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 510;
+  margin-bottom: 6px;
+}
+
+.error {
+  font-size: var(--mantine-font-size-sm);
+}
+
+.paper {
+  background-color: var(--app-color-surface);
+  border-color: var(--app-color-border);
+}
+
+.alert {
+  border: 1px solid var(--app-color-border);
+}

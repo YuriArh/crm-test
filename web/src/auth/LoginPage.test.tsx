@@ -94,6 +94,19 @@ describe('LoginPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Ошибка на сервере');
   });
 
+  it('fills the form with a demo user and clears the previous error', async () => {
+    server.use(http.post('*/api/auth/login', () => problem(401, 'BAD_CREDENTIALS')));
+    renderApp('/login', { me: null });
+    const user = await fillAndSubmit('someone', 'wrong');
+    await screen.findByRole('alert');
+
+    await user.click(screen.getByRole('button', { name: /south\.initiator/ }));
+
+    expect(screen.getByLabelText('Логин')).toHaveValue('south.initiator');
+    expect(screen.getByLabelText('Пароль')).toHaveValue('demo1234');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('sends one request however often the button is clicked while signing in', async () => {
     let calls = 0;
     server.use(
