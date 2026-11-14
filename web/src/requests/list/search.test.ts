@@ -61,6 +61,11 @@ describe('toApiParams', () => {
     });
   });
 
+  it('ignores raw address keys that validation dropped (the router keeps them)', () => {
+    const raw = { page: 'abc', result: 'foo', sort: 'deadline' } as unknown as Parameters<typeof toApiParams>[0];
+    expect(toApiParams(raw, 'OPERATOR')).toEqual({ page: 0, size: 20, sort: 'deadline,asc' });
+  });
+
   it('maps every sort', () => {
     expect(toApiParams({ sort: 'old' }, 'OPERATOR').sort).toBe('createdAt,asc');
     expect(toApiParams({ sort: 'deadline' }, 'OPERATOR').sort).toBe('deadline,asc');
