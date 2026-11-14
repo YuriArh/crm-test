@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import com.acme.carrier.fault.FaultSnapshot;
 import com.acme.carrier.operation.ResultStatus;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -23,7 +24,7 @@ class ExecutionDao {
     /** Oldest accepted operations, locked for this transaction; rows locked by someone else are skipped. */
     List<Pending> lockAccepted(int limit) {
         return jdbc.sql("""
-                        SELECT operation_id, weight_kg, delivery_address
+                        SELECT operation_id, weight_kg, delivery_address, fault_duplicate, fault_delayed
                           FROM operation
                          WHERE state = 'ACCEPTED'
                          ORDER BY received_at, operation_id
@@ -32,20 +33,27 @@ class ExecutionDao {
                         """)
                 .param("limit", limit)
                 .query((rs, row) -> new Pending(rs.getObject("operation_id", UUID.class),
-                        rs.getBigDecimal("weight_kg"), rs.getString("delivery_address")))
+                        rs.getBigDecimal("weight_kg"), rs.getString("delivery_address"),
+                        new FaultSnapshot(rs.getBoolean("fault_duplicate"), rs.getBoolean("fault_delayed"))))
                 .list();
     }
 
-    /** {@code ACCEPTED → EXECUTED}; returns {@code false} if the operation was not ACCEPTED (never executes twice). */
-    boolean markExecuted(UUID operationId, Outcome outcome, Instant now) {
+    /**
+     * {@code ACCEPTED → EXECUTED} with the outcome and the message ids of both feed entries; returns {@code false}
+     * if the operation was not ACCEPTED (never executes twice).
+     */
+    boolean markExecuted(UUID operationId, Outcome outcome, MessageIds messageIds, Instant now) {
         return jdbc.sql("""
                         UPDATE operation
-                           SET state = 'EXECUTED', execution_count = execution_count + 1, executed_at = :now,
-                               result_status = :status, tracking_number = :tracking, price = :price, reason = :reason
+                           SET state = 'EXECUTED', executed_at = :now,
+                               result_status = :status, tracking_number = :tracking, price = :price, reason = :reason,
+                               in_progress_message_id = :inProgressId, result_message_id = :resultId
                          WHERE operation_id = :id AND state = 'ACCEPTED'
                         """)
                 .param("id", operationId)
                 .param("now", Timestamp.from(now))
+                .param("inProgressId", messageIds.inProgress())
+                .param("resultId", messageIds.result())
                 .param("status", outcome.status().name())
                 .param("tracking", outcome.trackingNumber())
                 .param("price", outcome.price())
@@ -71,6 +79,10 @@ class ExecutionDao {
                 .update();
     }
 
-    record Pending(UUID operationId, BigDecimal weightKg, String deliveryAddress) {
+    record Pending(UUID operationId, BigDecimal weightKg, String deliveryAddress, FaultSnapshot faults) {
+    }
+
+    /** Message ids of an operation's feed entries, assigned at execution. */
+    record MessageIds(UUID inProgress, UUID result) {
     }
 }

@@ -6,6 +6,7 @@ import java.util.List;
 
 import com.acme.carrier.config.CarrierProperties;
 import com.acme.carrier.config.UuidV7Generator;
+import com.acme.carrier.operation.OperationDao;
 import com.acme.carrier.operation.ResultStatus;
 
 import org.slf4j.Logger;
@@ -69,12 +70,14 @@ public class Executor {
     private boolean execute(ExecutionDao.Pending pending) {
         Outcome outcome = OutcomePolicy.decide(pending.operationId(), pending.weightKg(), pending.deliveryAddress());
         Instant now = clock.instant();
-        if (!dao.markExecuted(pending.operationId(), outcome, now)) {
+        ExecutionDao.MessageIds messageIds = new ExecutionDao.MessageIds(ids.newId(), ids.newId());
+        if (!dao.markExecuted(pending.operationId(), outcome, messageIds, now)) {
             return false;
         }
-        dao.publish(ids.newId(), pending.operationId(), 1, ResultStatus.IN_PROGRESS, null, null, null, now);
-        dao.publish(ids.newId(), pending.operationId(), 2, outcome.status(), outcome.trackingNumber(),
-                outcome.price(), outcome.reason(), now);
+        dao.publish(messageIds.inProgress(), pending.operationId(), 1, ResultStatus.IN_PROGRESS, null, null, null,
+                now);
+        dao.publish(messageIds.result(), pending.operationId(), OperationDao.FINAL_SEQUENCE, outcome.status(),
+                outcome.trackingNumber(), outcome.price(), outcome.reason(), now);
         return true;
     }
 }
