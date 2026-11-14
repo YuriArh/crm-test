@@ -1,5 +1,5 @@
-import { queryOptions } from '@tanstack/react-query';
-import { api, unwrap, type RequestCard } from '@/shared/api';
+import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api, isApiError, unwrap, type RequestCard, type UpdateRequest } from '@/shared/api';
 import { requestKeys } from '../keys';
 import { isFinalBusiness, isFinalDelivery } from '../statuses';
 
@@ -23,8 +23,31 @@ export function requestCardQueryOptions(id: string) {
     staleTime: 1_000,
     refetchInterval: (query) => {
       const card = query.state.data;
-      return card === undefined || isFinalCard(card) ? false : CARD_REFRESH_MS;
+      // A request that has left the caller's scope (404) will not come back by asking again.
+      if (card === undefined || isFinalCard(card) || isCardGone(query.state.error)) return false;
+      return CARD_REFRESH_MS;
     },
     refetchIntervalInBackground: false,
+  });
+}
+
+/** The request is gone from the caller's scope: someone else's, or no longer visible (NF02). */
+export function isCardGone(error: unknown): boolean {
+  return isApiError(error) && error.status === 404;
+}
+
+/**
+ * `PATCH /api/requests/{id}`: the answer replaces the card in the cache and the lists are marked stale.
+ * A refresh in flight is cancelled first, so an older card cannot land on top of the answer.
+ */
+export function useUpdateRequest(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UpdateRequest) => unwrap(api.PATCH('/api/requests/{id}', { params: { path: { id } }, body })),
+    onMutate: () => queryClient.cancelQueries({ queryKey: requestKeys.card(id) }),
+    onSuccess: (card) => {
+      queryClient.setQueryData(requestKeys.card(id), card);
+      void queryClient.invalidateQueries({ queryKey: requestKeys.lists });
+    },
   });
 }

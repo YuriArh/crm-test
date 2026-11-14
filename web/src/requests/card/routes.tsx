@@ -1,7 +1,6 @@
 import { createRoute, notFound } from '@tanstack/react-router';
 import { authenticatedRoute } from '@/auth';
-import { isApiError } from '@/shared/api';
-import { requestCardQueryOptions } from './api';
+import { isCardGone, requestCardQueryOptions } from './api';
 import { RequestCardPage } from './RequestCardPage';
 import { RequestNotFound } from './RequestNotFound';
 
@@ -16,7 +15,7 @@ export const requestCardRoute = createRoute({
     try {
       await context.queryClient.ensureQueryData(requestCardQueryOptions(params.id));
     } catch (error) {
-      if (isApiError(error) && error.status === 404) {
+      if (isCardGone(error)) {
         throw notFound();
       }
       throw error;

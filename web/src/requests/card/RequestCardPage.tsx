@@ -1,15 +1,21 @@
 import { Container, Divider, Grid, Paper, Stack } from '@mantine/core';
 import { useSuspenseQuery } from '@tanstack/react-query';
-import { requestCardQueryOptions } from './api';
+import { isCardGone, requestCardQueryOptions } from './api';
 import { CardHeader } from './CardHeader';
 import { ContentSection } from './ContentSection';
+import { CommentField, SaveActions } from './EditableFields';
 import { ExchangePanel } from './ExchangePanel';
 import { PropertiesPanel } from './PropertiesPanel';
+import { RequestNotFound } from './RequestNotFound';
 import { ResultSection } from './ResultSection';
+import { useCardEditor } from './useCardEditor';
 
 /** The request card: main content on the left, properties (and the operator's exchange block) on the right. */
 export function RequestCardPage({ id }: { id: string }) {
-  const { data: card } = useSuspenseQuery(requestCardQueryOptions(id));
+  const { data: card, error } = useSuspenseQuery(requestCardQueryOptions(id));
+  const editor = useCardEditor(card);
+
+  if (isCardGone(error)) return <RequestNotFound />;
 
   return (
     <Container size="lg" px={0}>
@@ -20,6 +26,10 @@ export function RequestCardPage({ id }: { id: string }) {
             <Stack gap="xl">
               <ContentSection card={card} />
               <ResultSection card={card} />
+              <Stack gap="sm">
+                <CommentField editor={editor} />
+                <SaveActions editor={editor} />
+              </Stack>
             </Stack>
           </Grid.Col>
           <Grid.Col span={{ base: 12, sm: 4, lg: 3 }}>

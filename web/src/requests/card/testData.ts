@@ -3,7 +3,16 @@ import { http, HttpResponse } from 'msw';
 import type { Me, RequestCard, UserSummary } from '@/shared/api';
 import { demoInitiator, server } from '@/test/server';
 
-export const CARD_ID = '0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60';
+// jsdom has no `document.fonts`, which the autosize Textarea of the comment listens to. Kept here so the
+// shared src/test/setup.ts stays untouched on this branch; it belongs there once merged.
+if (typeof document !== 'undefined' && !('fonts' in document)) {
+  Object.defineProperty(document, 'fonts', {
+    value: { addEventListener: () => {}, removeEventListener: () => {} },
+    configurable: true,
+  });
+}
+
+export const CARD_ID ='0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60';
 
 export const demoOperator: Me = {
   ...demoInitiator,
