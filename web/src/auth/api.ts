@@ -1,7 +1,9 @@
-import { queryOptions } from '@tanstack/react-query';
-import { ApiError, api, type Me } from '@/shared/api';
+import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query';
+import { ApiError, api, unwrap, type LoginRequest, type Me } from '@/shared/api';
+import { meKey } from './keys';
+import { replaceSession } from './session';
 
-export const meKey = ['auth', 'me'] as const;
+export { meKey };
 
 /**
  * The signed-in user, `null` when nobody is signed in (`401` here is an answer, not an error). It
@@ -22,4 +24,13 @@ async function fetchMe(): Promise<Me | null> {
     throw ApiError.from(response.status, error);
   }
   return data;
+}
+
+/** Signs in; on success the cache holds only the new user. The CSRF token rotates, the data layer reads it anew. */
+export function useLogin() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: LoginRequest) => unwrap(api.POST('/api/auth/login', { body })),
+    onSuccess: (me) => replaceSession(queryClient, me),
+  });
 }
