@@ -10,7 +10,6 @@ dispatch/          main application: accepts delivery requests, dispatches them
 carrier-emulator/  emulator of the external delivery carrier (own database `carrier`)
 contracts/         OpenAPI contracts (dispatch-api.yaml: web ↔ dispatch, carrier-api.yaml: dispatch ↔ carrier)
 docker/            PostgreSQL init script (creates the carrier database)
-web/               web client: React + TypeScript + Vite + Mantine, served by nginx in Docker
 docs/              plan and documentation
 ```
 
@@ -18,21 +17,18 @@ docs/              plan and documentation
 
 - Docker with Docker Compose
 - JDK 25 — only to build and run `dispatch` outside Docker
-- Node.js 22 with corepack (pnpm) — only to develop `web/` outside Docker
 
 ## Run
 
 ```bash
 cp .env.example .env
-make up        # build and start postgres + dispatch + carrier-emulator + web
+make up        # build and start postgres + dispatch + carrier-emulator
 make ps        # service status
 ```
 
-Open http://localhost:3000 and sign in as a demo user (below). The web client and the API share this origin: nginx serves the static build and proxies `/api` to `dispatch`.
-
 Check: `curl http://localhost:8080/actuator/health`, `curl http://localhost:8080/api/system/info` and `curl http://localhost:8081/actuator/health` (emulator).
 
-If port 5432, 8080, 8081 or 3000 is already taken, change `DB_PORT` / `DISPATCH_PORT` / `CARRIER_PORT` / `WEB_PORT` in `.env`. Both `docker compose` and `make run` read it.
+If port 5432, 8080 or 8081 is already taken, change `DB_PORT` / `DISPATCH_PORT` / `CARRIER_PORT` in `.env`. Both `docker compose` and `make run` read it.
 
 The emulator's database is created by `docker/postgres/init` only when the PostgreSQL volume is empty. If the stack was started before the emulator existed, run `make reset` once (it deletes local data).
 
@@ -150,18 +146,3 @@ make test      # tests; integration tests use Testcontainers, so Docker must be 
 - Instants are stored and processed in UTC; the business time zone is `APP_TIMEZONE` (default `Europe/Moscow`).
 - The database schema is managed only by Flyway migrations (`dispatch/src/main/resources/db/migration`).
 - Data access: Spring Data JDBC for entities, explicit SQL via `JdbcClient` for the exchange core; no JPA/Hibernate.
-
-## Web client
-
-```bash
-make web-install   # once: install web/ dependencies
-make web-dev       # http://localhost:5173, proxies /api to dispatch on :8080 (make run or make up)
-make web-build     # typecheck, lint, unit tests, production build
-make web-e2e       # browser scenarios (Playwright) against the stack on :3000 (make up first)
-```
-
-- Types of the API come from `contracts/dispatch-api.yaml`: after changing the contract run `make web-api-types` (regenerates `web/src/api/schema.d.ts`).
-- Screens: login, registry (filters, sorting and page in the URL; table on wide screens, cards from 390 px), new request (initiators), request card (both statuses, result, exchange block for operators, assignee and comment). The card refreshes itself every 2.5 s until the result is final.
-- Dates and times are shown in the business time zone from `/api/system/info`, not in the browser's zone.
-- Create sends an `Idempotency-Key` that stays the same while the content does not change, so a repeated click or a retry after a lost answer creates one request.
-- On `409 VERSION_CONFLICT` the card shows the other user's value next to yours and saves only when you choose; if only other data changed (e.g. the status), your change is re-sent on top of the new version.

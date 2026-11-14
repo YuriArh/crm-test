@@ -1,5 +1,0 @@
-dist
-pnpm-lock.yaml
-src/api/schema.d.ts
-playwright-report
-test-results

@@ -9,10 +9,6 @@ out/
 *.iml
 .vscode/
 
-# Node (web, later)
-node_modules/
-dist/
-
 # Claude Code agent worktrees
 .claude/worktrees/
 
