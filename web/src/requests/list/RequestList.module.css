@@ -92,6 +92,11 @@
   font-family: var(--mantine-font-family-monospace);
 }
 
+/* An active filter shows that the list is narrowed. */
+.activeFilter {
+  border-color: var(--mantine-color-accent-6);
+}
+
 /* Keeps its height while hidden, so the loading bar does not shift the rows. */
 .loadingBar {
   visibility: hidden;

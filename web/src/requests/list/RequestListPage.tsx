@@ -7,8 +7,21 @@ import { isApiError, NetworkError, type Role } from '@/shared/api';
 import { useBusinessTimezone } from '@/shared/system';
 import { requestListQueryOptions } from './api';
 import classes from './RequestList.module.css';
+import { RequestFilterBar } from './RequestFilters';
 import { RequestTable, RequestTableSkeleton } from './RequestTable';
-import { activeFilterCount, formatPageRange, parseListSearch, searchForRole, toApiParams, withoutFilters, withPage } from './search';
+import {
+  activeFilterCount,
+  formatPageRange,
+  parseListSearch,
+  searchForRole,
+  toApiParams,
+  withFilters,
+  withoutFilters,
+  withPage,
+  withSort,
+  type ListFilters,
+  type ListSort,
+} from './search';
 
 const route = getRouteApi('/_authenticated/requests');
 
@@ -37,7 +50,12 @@ export function RequestListPage() {
   const params = toApiParams(search, me.role);
   const query = useQuery(requestListQueryOptions(params));
   const { data, error } = query;
-  const filtered = activeFilterCount(search, me.role) > 0;
+  const activeCount = activeFilterCount(search, me.role);
+  const filtered = activeCount > 0;
+  const clean = (prev: Record<string, unknown>) => searchForRole(parseListSearch(prev), me.role);
+  const changeFilters = (change: Partial<ListFilters>) => void navigate({ search: (prev) => withFilters(clean(prev), change) });
+  const resetFilters = () => void navigate({ search: (prev) => withoutFilters(clean(prev)) });
+  const changeSort = (sort: ListSort) => void navigate({ search: (prev) => withSort(clean(prev), sort) });
 
   // Garbage in the address (`result=foo`, `page=abc`, an initiator's `delivery`) is dropped from it as well.
   const dirty = JSON.stringify(rawSearch) !== JSON.stringify(search);
@@ -71,6 +89,15 @@ export function RequestListPage() {
           </Text>
         )}
       </Group>
+
+      <RequestFilterBar
+        search={search}
+        role={me.role}
+        activeCount={activeCount}
+        onFilters={changeFilters}
+        onReset={resetFilters}
+        onSort={changeSort}
+      />
 
       <Box>
         <Progress
@@ -108,7 +135,7 @@ export function RequestListPage() {
         {data && data.totalElements === 0 && filtered && (
           <Stack align="center" gap="sm" py="xl">
             <Text fw={510}>Ничего не найдено</Text>
-            <Button variant="default" onClick={() => void navigate({ search: (prev) => withoutFilters(prev) })}>
+            <Button variant="default" onClick={resetFilters}>
               Сбросить фильтры
             </Button>
           </Stack>
