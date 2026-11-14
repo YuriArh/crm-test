@@ -6,6 +6,7 @@ import { CardHeader } from './CardHeader';
 import { ContentSection } from './ContentSection';
 import { AssigneeField, CommentField, SaveActions } from './EditableFields';
 import { ExchangePanel } from './ExchangePanel';
+import { LeaveGuard } from './LeaveGuard';
 import { PropertiesPanel } from './PropertiesPanel';
 import { RequestNotFound } from './RequestNotFound';
 import { ResultSection } from './ResultSection';
@@ -21,6 +22,7 @@ export function RequestCardPage({ id }: { id: string }) {
 
   return (
     <Container size="lg" px={0}>
+      <LeaveGuard dirty={editor.dirty} />
       <Stack gap="lg">
         <CardHeader card={card} />
         <Grid gap="xl">
@@ -29,7 +31,7 @@ export function RequestCardPage({ id }: { id: string }) {
               <ContentSection card={card} />
               <ResultSection card={card} />
               <Stack gap="sm">
-                <CommentField editor={editor} />
+                <CommentField card={card} editor={editor} />
                 <SaveActions editor={editor} />
               </Stack>
             </Stack>
