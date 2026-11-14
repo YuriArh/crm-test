@@ -166,3 +166,9 @@ make web-e2e       # Playwright: against the dev server, then against the stack 
 - Data layer `src/shared/api/`: types generated from `contracts/dispatch-api.yaml`, one HTTP client with the
   CSRF header and Problem Details errors. After changing the contract run `make web-api-types`;
   `make web-build` fails while the types are out of date.
+- Sign-in: open http://localhost:3000 and sign in as a demo user (above; the login page lists them too).
+  Any page opened without a session leads to the login page and back afterwards. The header shows the user,
+  role and service, and has the sign-out button. When the session is lost (sign-out in another tab,
+  `dispatch` restarted) the next action leads to the login page.
+- `make web-e2e` runs the browser tests against the stack as it was built: after changing `web/`, rebuild it
+  with `make up` (or `docker compose up -d --build web`) first.
