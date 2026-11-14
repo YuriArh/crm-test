@@ -9,11 +9,15 @@ import java.util.UUID;
 import com.acme.carrier.fault.FaultSnapshot;
 import com.acme.carrier.operation.ResultStatus;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 @Repository
 class ExecutionDao {
+
+    private static final Logger log = LoggerFactory.getLogger(ExecutionDao.class);
 
     private final JdbcClient jdbc;
 
@@ -61,21 +65,36 @@ class ExecutionDao {
                 .update() == 1;
     }
 
-    void publish(UUID messageId, UUID operationId, int sequence, ResultStatus status, String trackingNumber,
-                 BigDecimal price, String reason, Instant occurredAt) {
+    /**
+     * Publishes a feed entry. Every feed publication (immediate or deferred) goes through here.
+     * <p>
+     * For an operation that remembered the {@code duplicate} fault mode the entry is inserted twice: the same
+     * {@code messageId} and content under adjacent {@code feedSeq} (the executor is the only feed writer),
+     * in the caller's transaction.
+     */
+    void publish(FeedEntry entry, boolean duplicate) {
+        insert(entry);
+        if (duplicate) {
+            insert(entry);
+            log.warn("Feed entry published twice (duplicate fault): operationId={}, sequence={}, messageId={}",
+                    entry.operationId(), entry.sequence(), entry.messageId());
+        }
+    }
+
+    private void insert(FeedEntry entry) {
         jdbc.sql("""
                         INSERT INTO feed_entry (message_id, operation_id, sequence, status, tracking_number, price,
                                                 reason, occurred_at)
                         VALUES (:messageId, :operationId, :sequence, :status, :tracking, :price, :reason, :occurredAt)
                         """)
-                .param("messageId", messageId)
-                .param("operationId", operationId)
-                .param("sequence", sequence)
-                .param("status", status.name())
-                .param("tracking", trackingNumber)
-                .param("price", price)
-                .param("reason", reason)
-                .param("occurredAt", Timestamp.from(occurredAt))
+                .param("messageId", entry.messageId())
+                .param("operationId", entry.operationId())
+                .param("sequence", entry.sequence())
+                .param("status", entry.status().name())
+                .param("tracking", entry.trackingNumber())
+                .param("price", entry.price())
+                .param("reason", entry.reason())
+                .param("occurredAt", Timestamp.from(entry.occurredAt()))
                 .update();
     }
 
@@ -84,5 +103,10 @@ class ExecutionDao {
 
     /** Message ids of an operation's feed entries, assigned at execution. */
     record MessageIds(UUID inProgress, UUID result) {
+    }
+
+    /** A feed entry to publish ({@code feed_entry} without {@code feed_seq}, which the database assigns). */
+    record FeedEntry(UUID messageId, UUID operationId, int sequence, ResultStatus status, String trackingNumber,
+                     BigDecimal price, String reason, Instant occurredAt) {
     }
 }

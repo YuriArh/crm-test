@@ -74,10 +74,12 @@ public class Executor {
         if (!dao.markExecuted(pending.operationId(), outcome, messageIds, now)) {
             return false;
         }
-        dao.publish(messageIds.inProgress(), pending.operationId(), 1, ResultStatus.IN_PROGRESS, null, null, null,
-                now);
-        dao.publish(messageIds.result(), pending.operationId(), OperationDao.FINAL_SEQUENCE, outcome.status(),
-                outcome.trackingNumber(), outcome.price(), outcome.reason(), now);
+        boolean duplicate = pending.faults().duplicate();
+        dao.publish(new ExecutionDao.FeedEntry(messageIds.inProgress(), pending.operationId(), 1,
+                ResultStatus.IN_PROGRESS, null, null, null, now), duplicate);
+        dao.publish(new ExecutionDao.FeedEntry(messageIds.result(), pending.operationId(),
+                OperationDao.FINAL_SEQUENCE, outcome.status(), outcome.trackingNumber(), outcome.price(),
+                outcome.reason(), now), duplicate);
         return true;
     }
 }
