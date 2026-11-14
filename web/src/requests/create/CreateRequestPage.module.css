@@ -1,0 +1,8 @@
+/* A field label with its character counter on the right of the same line. */
+.labelWithCounter {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--mantine-spacing-sm);
+  width: 100%;
+}
