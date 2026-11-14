@@ -97,14 +97,15 @@ curl -s -c "$JAR" -b "$JAR" -X PATCH -H "X-XSRF-TOKEN: $(token)" -H 'Content-Typ
 
 ## Carrier emulator
 
-`carrier-emulator` (port 8081) stands in for the external delivery carrier. Contract and exchange rules: `contracts/carrier-api.yaml`; design: `docs/carrier-emulator-design.md`. Fault modes are not implemented yet.
+`carrier-emulator` (port 8081) stands in for the external delivery carrier. Contract and exchange rules: `contracts/carrier-api.yaml`; design: `docs/carrier-emulator-design.md`; fault modes: `docs/specs/carrier-faults.md`.
 
 | Method and path | What |
 |---|---|
 | `POST /operations` | receive an operation; `202` also for a repeat with the same content (no second execution), `409 PAYLOAD_MISMATCH` for the same `operationId` with other content |
 | `GET /operations/{operationId}` | carrier's state and latest result (for reconciliation); `404` if unknown |
 | `GET /results?after=N&limit=100` | result feed after cursor `N`: `IN_PROGRESS`, then `SUCCEEDED` / `REJECTED` |
-| `GET /admin/operations[?operationId=]` | operations with `receivedCount` and `executionCount` (also `make carrier-ops`) |
+| `GET /admin/operations[?operationId=]` | operations with `receivedCount`, `executionCount`, remembered `faults` and `resultPublishAt` (also `make carrier-ops`) |
+| `GET` / `PUT /admin/faults` | fault mode switches (also `make faults`, `make fault-*`) |
 
 - Operations are executed in the background about a second after receipt.
 - The outcome is deterministic: weight over 10 000 kg or an address containing `тест-отказ` → rejected; otherwise a tracking number `TRK-…` and price `300 + 25 × weight`.
@@ -119,6 +120,26 @@ sleep 2
 curl -s localhost:8081/operations/$ID
 curl -s "localhost:8081/results?after=0"
 ```
+
+### Fault modes
+
+Four switches in the emulator's memory (all off after a restart): `unavailable` (`503` on the exchange endpoints), `loseResponse` (the response to the first receipt is held until the operation is executed and 10 s have passed — longer than dispatch's 5 s timeout), `duplicate` (every feed entry published twice under the same `messageId`), `delayed` (executed at once, feed entries published after 15 s on the stack, the final result before `IN_PROGRESS`). `duplicate` and `delayed` are remembered by an operation when it is received. Every `make fault-*` switches on only its mode; combinations go through `PUT /admin/faults`. Delays: `CARRIER_LOSE_RESPONSE_DELAY`, `CARRIER_DELAYED_RESULT_DELAY`.
+
+```bash
+make fault-lose-response   # create a request → result via the feed, acknowledged via RESULT, no resend
+make carrier-ops           # one operation, receivedCount = 1, state = EXECUTED
+curl -X PUT localhost:8081/admin/faults -H 'Content-Type: application/json' \
+  -d '{"unavailable":false,"loseResponse":true,"duplicate":false,"delayed":true}'
+                           # create a request → UNKNOWN, resend, ACKNOWLEDGED via RESPONSE, result after ~15 s
+make carrier-ops           # one operation, receivedCount = 2, state = EXECUTED
+make fault-duplicate       # create a request → one result, two entries per message in the feed
+make fault-delayed         # create a request → result after ~15 s, the late IN_PROGRESS is ignored
+make fault-unavailable     # create a request → RETRY_WAIT; then make fault-off → result
+make fault-off
+make faults                # current switches
+```
+
+What to look at: the dispatch card as an operator (`deliveryStatus`, `businessStatus`, `exchange.attempts`, `exchange.acknowledgedVia`, `exchange.lastError`), `make carrier-ops` (exactly one operation per request, `receivedCount`, `faults`, `resultPublishAt`) and the emulator log (`make logs-carrier`, lines `Fault <mode>: …`).
 
 ## Tests
 
