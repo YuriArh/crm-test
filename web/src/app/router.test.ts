@@ -1,10 +1,23 @@
 import { createMemoryHistory } from '@tanstack/react-router';
 import { describe, expect, it } from 'vitest';
+import { meKey } from '@/auth/api';
+import type { Me } from '@/shared/api';
 import { createQueryClient } from './queryClient';
 import { createAppRouter } from './router';
 
-async function routeIdsAt(path: string): Promise<string[]> {
-  const router = createAppRouter(createQueryClient(), {
+const me: Me = {
+  id: 'u1',
+  username: 'north.initiator',
+  displayName: 'Инициатор (Север)',
+  role: 'INITIATOR',
+  service: { id: 's1', code: 'NORTH', name: 'Служба Север' },
+};
+
+/** Loads `path` with the `me` query already answered, so no request leaves the test. */
+async function routeIdsAt(path: string, user: Me | null): Promise<string[]> {
+  const queryClient = createQueryClient();
+  queryClient.setQueryData(meKey, user);
+  const router = createAppRouter(queryClient, {
     history: createMemoryHistory({ initialEntries: [path] }),
   });
   await router.load();
@@ -21,11 +34,11 @@ describe('createAppRouter', () => {
   });
 
   it('serves /login outside the signed-in layout', async () => {
-    expect(await routeIdsAt('/login')).toEqual(['__root__', '/login']);
+    expect(await routeIdsAt('/login', null)).toEqual(['__root__', '/login']);
   });
 
   it('serves the home page inside the signed-in layout', async () => {
-    expect(await routeIdsAt('/')).toEqual(['__root__', '/_authenticated', '/_authenticated/']);
+    expect(await routeIdsAt('/', me)).toEqual(['__root__', '/_authenticated', '/_authenticated/']);
   });
 
 });

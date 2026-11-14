@@ -10,7 +10,9 @@ test.skip(!!process.env.WEB_BASE_URL, 'loads source modules from the Vite dev se
 test.beforeEach(async ({ page, request }) => {
   const info = await request.get('/api/system/info').catch(() => undefined);
   expect(info?.ok(), 'dispatch must be reachable through the dev server proxy (make up)').toBe(true);
-  await page.goto('/');
+  await page.goto('/login');
+  // The page itself asks /api/auth/me, and dispatch sets the CSRF cookie with any answer: start clean.
+  await page.context().clearCookies();
 });
 
 /** Runs `body` in the page with the data layer module (`@/shared/api`) as `api`. */
