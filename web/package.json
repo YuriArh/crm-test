@@ -15,7 +15,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
-    "e2e:install": "playwright install chromium"
+    "e2e:install": "playwright install chromium",
+    "api:types": "openapi-typescript ../contracts/dispatch-api.yaml -o src/shared/api/schema.d.ts",
+    "api:check": "openapi-typescript ../contracts/dispatch-api.yaml -o src/shared/api/schema.d.ts --check"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -27,6 +29,7 @@
     "@mantine/hooks": "^9.8.0",
     "@tanstack/react-query": "^5.107.1",
     "@tanstack/react-router": "^1.170.46",
+    "openapi-fetch": "^0.17.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
@@ -36,6 +39,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
+    "openapi-typescript": "^7.13.0",
     "postcss": "^8.5.33",
     "postcss-preset-mantine": "^1.18.0",
     "postcss-simple-vars": "^7.0.1",
