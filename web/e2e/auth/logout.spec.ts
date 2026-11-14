@@ -14,7 +14,7 @@ test('the header shows the operator and their service', async ({ page }) => {
 test('sign-out leads to the login page, and Back does not bring the page back', async ({ page }) => {
   await signInViaApi(page, 'north.initiator');
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: /Здравствуйте/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Заявки' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Выйти' }).click();
   await expect(page.getByRole('heading', { name: 'Вход' })).toBeVisible();
@@ -22,7 +22,7 @@ test('sign-out leads to the login page, and Back does not bring the page back', 
   await page.goBack();
   await expect(page).toHaveURL((url) => url.pathname === '/login');
   await expect(page.getByRole('heading', { name: 'Вход' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: /Здравствуйте/ })).toBeHidden();
+  await expect(page.getByRole('heading', { name: 'Заявки' })).toBeHidden();
 
   const me = await page.request.get('/api/auth/me');
   expect(me.status()).toBe(401);

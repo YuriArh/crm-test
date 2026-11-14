@@ -37,8 +37,9 @@ describe('createAppRouter', () => {
     expect(await routeIdsAt('/login', null)).toEqual(['__root__', '/login']);
   });
 
-  it('serves the home page inside the signed-in layout', async () => {
-    expect(await routeIdsAt('/', me)).toEqual(['__root__', '/_authenticated', '/_authenticated/']);
+  it('serves the registry inside the signed-in layout', async () => {
+    expect(await routeIdsAt('/requests', me)).toEqual(['__root__', '/_authenticated', '/_authenticated/requests']);
   });
 
+  // `/` → `/requests` is followed only in a browser: see RequestListPage.test.tsx.
 });

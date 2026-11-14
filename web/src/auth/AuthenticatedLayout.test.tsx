@@ -2,7 +2,8 @@
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { listHandlers } from '@/requests/list/fixtures';
 import type { Me } from '@/shared/api';
 import { demoInitiator, problem, server } from '@/test/server';
 import { renderApp } from '@/test/renderApp';
@@ -17,6 +18,8 @@ const operator: Me = {
 };
 
 describe('AuthenticatedLayout', () => {
+  beforeEach(() => server.use(...listHandlers()));
+
   it('shows who is signed in: name, role and service', async () => {
     renderApp('/', { me: operator });
 

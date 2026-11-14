@@ -5,6 +5,7 @@ import { delay, http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { demoInitiator, problem, server } from '@/test/server';
 import { renderApp } from '@/test/renderApp';
+import { listHandlers } from '@/requests/list/fixtures';
 
 async function fillAndSubmit(username: string, password: string) {
   const user = userEvent.setup();
@@ -23,13 +24,14 @@ describe('LoginPage', () => {
         body = await request.json();
         return HttpResponse.json(demoInitiator);
       }),
+      ...listHandlers(),
     );
-    const { history } = renderApp('/login?next=%2F%3Ftab%3Dx', { me: null });
+    const { history } = renderApp('/login?next=%2Frequests%3Fresult%3DREJECTED', { me: null });
 
     await fillAndSubmit('  north.initiator ', 'demo1234');
 
-    expect(await screen.findByRole('heading', { name: 'Здравствуйте, Инициатор (Север)' })).toBeInTheDocument();
-    expect(history.location.pathname + history.location.search).toBe('/?tab=x');
+    expect(await screen.findByRole('heading', { name: 'Заявки' })).toBeInTheDocument();
+    expect(history.location.pathname + history.location.search).toBe('/requests?result=REJECTED');
     expect(body).toEqual({ username: 'north.initiator', password: 'demo1234' });
   });
 
@@ -115,6 +117,7 @@ describe('LoginPage', () => {
         await delay(200);
         return HttpResponse.json(demoInitiator);
       }),
+      ...listHandlers(),
     );
     renderApp('/login', { me: null });
 
@@ -122,7 +125,7 @@ describe('LoginPage', () => {
     await user.click(screen.getByRole('button', { name: /Войти/ })).catch(() => undefined);
     await user.type(screen.getByLabelText('Пароль'), '{Enter}');
 
-    await screen.findByRole('heading', { name: /Здравствуйте/ });
+    await screen.findByRole('heading', { name: 'Заявки' });
     await waitFor(() => expect(calls).toBe(1));
   });
 });

@@ -95,7 +95,8 @@ export function searchForRole(search: RequestListSearch, role: Role): RequestLis
 
 /** The address → query parameters of `GET /api/requests` (pages from 0 there). */
 export function toApiParams(search: RequestListSearch, role: Role): RequestListParams {
-  const effective = searchForRole(search, role);
+  // The router may pass keys that validation dropped, so the address is parsed again here.
+  const effective = searchForRole(parseListSearch(search), role);
   const params: RequestListParams = {
     page: (effective.page ?? 1) - 1,
     size: PAGE_SIZE,
