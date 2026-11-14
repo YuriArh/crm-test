@@ -163,6 +163,20 @@ class SendWorkerTests {
     }
 
     @Test
+    void batchIsSentInDueOrder() {
+        List<UUID> created = new ArrayList<>();
+        for (int i = 1; i <= 6; i++) {
+            created.add(requests.create(String.valueOf(i)).operationId());
+            clock.advance(Duration.ofSeconds(1));
+        }
+
+        assertThat(worker.runOnce()).isEqualTo(6);
+
+        // UPDATE … RETURNING has no order of its own; the claim must still hand the batch over oldest first.
+        assertThat(carrier.submitted()).extracting(SubmitRequest::operationId).containsExactlyElementsOf(created);
+    }
+
+    @Test
     void permanentErrorAndPayloadConflictFailWithoutRetry() {
         RequestCard rejected = requests.create("1");
         clock.advance(Duration.ofSeconds(1));   // the queue is ordered by due time: rejected goes first

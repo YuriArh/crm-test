@@ -43,23 +43,29 @@ public class SendQueueDao {
                 .list();
     }
 
-    /** Claims due operations for sending: {@code SENDING} with a lease, one more attempt counted. */
+    /**
+     * Claims due operations for sending: {@code SENDING} with a lease, one more attempt counted. They come back
+     * in due order (oldest first): {@code UPDATE … RETURNING} returns rows in no particular order, so the
+     * claimed rows are sorted in the outer query.
+     */
     List<Claimed> claimDue(Instant now, Instant leaseUntil, int limit) {
         return jdbc.sql("""
-                        UPDATE dispatch_operation o
-                           SET delivery_status = 'SENDING', locked_until = :leaseUntil, attempts = o.attempts + 1,
-                               updated_at = :now
-                          FROM delivery_request r
-                         WHERE r.id = o.request_id
-                           AND o.request_id IN (
-                               SELECT request_id FROM dispatch_operation
-                                WHERE delivery_status IN ('PENDING', 'RETRY_WAIT', 'UNKNOWN')
-                                  AND next_attempt_at <= :now
-                                ORDER BY next_attempt_at
-                                LIMIT :limit
-                                FOR UPDATE SKIP LOCKED)
-                        RETURNING o.request_id, o.operation_id, o.attempts,
-                                  r.cargo_description, r.weight_kg, r.delivery_address, r.deadline""")
+                        WITH claimed AS (
+                            UPDATE dispatch_operation o
+                               SET delivery_status = 'SENDING', locked_until = :leaseUntil, attempts = o.attempts + 1,
+                                   updated_at = :now
+                              FROM delivery_request r
+                             WHERE r.id = o.request_id
+                               AND o.request_id IN (
+                                   SELECT request_id FROM dispatch_operation
+                                    WHERE delivery_status IN ('PENDING', 'RETRY_WAIT', 'UNKNOWN')
+                                      AND next_attempt_at <= :now
+                                    ORDER BY next_attempt_at, request_id
+                                    LIMIT :limit
+                                    FOR UPDATE SKIP LOCKED)
+                            RETURNING o.request_id, o.operation_id, o.attempts, o.next_attempt_at,
+                                      r.cargo_description, r.weight_kg, r.delivery_address, r.deadline)
+                        SELECT * FROM claimed ORDER BY next_attempt_at, request_id""")
                 .param("now", toSql(now))
                 .param("leaseUntil", toSql(leaseUntil))
                 .param("limit", limit)
