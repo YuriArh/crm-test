@@ -1,21 +1,23 @@
 import type { QueryClient } from '@tanstack/react-query';
-import { createRootRouteWithContext, createRouter, Outlet } from '@tanstack/react-router';
+import { createRouter, type RouterHistory } from '@tanstack/react-router';
+import { authenticatedRoute, loginRoute } from '@/auth/routes';
+import { homeRoute } from '@/home/routes';
+import { ErrorPage } from '@/shared/ui/ErrorPage';
+import { NotFoundPage } from '@/shared/ui/NotFoundPage';
+import { rootRoute } from './rootRoute';
 
-export type RouterContext = {
-  queryClient: QueryClient;
-};
+export type { RouterContext } from './rootRoute';
 
-const rootRoute = createRootRouteWithContext<RouterContext>()({
-  component: Outlet,
-});
+// Modules add their routes here: public ones under the root, signed-in ones under authenticatedRoute.
+const routeTree = rootRoute.addChildren([loginRoute, authenticatedRoute.addChildren([homeRoute])]);
 
-// Modules will add their routes here.
-const routeTree = rootRoute.addChildren([]);
-
-export function createAppRouter(queryClient: QueryClient) {
+export function createAppRouter(queryClient: QueryClient, options: { history?: RouterHistory } = {}) {
   return createRouter({
     routeTree,
     context: { queryClient },
+    history: options.history,
+    defaultNotFoundComponent: NotFoundPage,
+    defaultErrorComponent: ErrorPage,
     // TanStack Query owns caching; the router always asks it.
     defaultPreloadStaleTime: 0,
   });
