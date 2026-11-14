@@ -2,8 +2,7 @@
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { notifications } from '@mantine/notifications';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { RequestCard, UpdateRequest } from '@/shared/api';
 import { demoInitiator, problem, server } from '@/test/server';
 import { renderApp } from '@/test/renderApp';
@@ -28,7 +27,6 @@ function saved(card: RequestCard, body: UpdateRequest): Response {
 
 describe('comment', () => {
   // The notifications store outlives a test's render.
-  afterEach(() => notifications.clean());
 
   it('saves only the comment with the version the edit started from', async () => {
     const card = succeededCard({ comment: 'Позвонить за час', version: 3 });

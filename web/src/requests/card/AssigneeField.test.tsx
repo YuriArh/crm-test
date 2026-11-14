@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
-import { notifications } from '@mantine/notifications';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { RequestCard, UpdateRequest } from '@/shared/api';
 import { demoInitiator, problem, server } from '@/test/server';
 import { renderApp } from '@/test/renderApp';
@@ -37,7 +36,6 @@ async function choose(option: string) {
 }
 
 describe('assignee', () => {
-  afterEach(() => notifications.clean());
 
   it('lets an operator assign himself', async () => {
     const card = withExchange(pendingCard({ version: 5 }));

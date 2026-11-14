@@ -8,9 +8,6 @@ import { demoInitiator, server } from '@/test/server';
 import { renderApp } from '@/test/renderApp';
 import { demoOperator, findRow, listItem, listPage, systemInfoHandler } from './fixtures';
 
-// Mantine's combobox scrolls the selected option into view; jsdom has no layout.
-Element.prototype.scrollIntoView ??= () => {};
-
 function serveList(answer: (query: URLSearchParams) => RequestPage = () => listPage([listItem()], { totalElements: 60 })) {
   const calls: URLSearchParams[] = [];
   server.use(

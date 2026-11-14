@@ -1,5 +1,7 @@
 import { MantineProvider } from '@mantine/core';
+import { DatesProvider } from '@mantine/dates';
 import { Notifications } from '@mantine/notifications';
+import 'dayjs/locale/ru';
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import type { createAppRouter } from './router';
@@ -18,10 +20,13 @@ export function AppProviders({ queryClient, router }: Props) {
       cssVariablesResolver={cssVariablesResolver}
       defaultColorScheme={DEFAULT_COLOR_SCHEME}
     >
-      <Notifications position="top-right" />
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>
+      {/* Calendars in Russian, weeks from Monday. */}
+      <DatesProvider settings={{ locale: 'ru' }}>
+        <Notifications position="top-right" />
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </DatesProvider>
     </MantineProvider>
   );
 }

@@ -129,12 +129,31 @@ describe('RequestListPage', () => {
     expect(await screen.findAllByTestId('skeleton-row')).toHaveLength(8);
   });
 
-  it('says that an initiator has no requests yet', async () => {
+  it('says that an initiator has no requests yet and offers to create one', async () => {
     serveList(listPage([]));
     renderApp('/requests', { me: demoInitiator });
 
     expect(await screen.findByText('Заявок пока нет')).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    // One in the header, one in the empty registry.
+    expect(screen.getAllByRole('link', { name: 'Новая заявка' })).toHaveLength(2);
+  });
+
+  it('leads an initiator to the create form from the header', async () => {
+    serveList(listPage([listItem({})]));
+    const { history } = renderApp('/requests', { me: demoInitiator });
+
+    await userEvent.click(await screen.findByRole('link', { name: 'Новая заявка' }));
+
+    await waitFor(() => expect(history.location.pathname).toBe('/requests/new'));
+  });
+
+  it('gives operators no way to create a request', async () => {
+    serveList(listPage([]));
+    renderApp('/requests', { me: demoOperator });
+
+    await screen.findByText('В службе пока нет заявок');
+    expect(screen.queryByRole('link', { name: 'Новая заявка' })).not.toBeInTheDocument();
   });
 
   it('says that the service of an operator has no requests yet', async () => {

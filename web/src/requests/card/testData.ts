@@ -3,19 +3,6 @@ import { http, HttpResponse } from 'msw';
 import type { Me, RequestCard, UserSummary } from '@/shared/api';
 import { demoInitiator, server } from '@/test/server';
 
-// Browser APIs jsdom lacks: `document.fonts` (the autosize Textarea listens to it) and `scrollIntoView`
-// (the Select dropdown calls it). Kept here so the shared src/test/setup.ts stays untouched on this
-// branch; they belong there once merged.
-if (typeof document !== 'undefined') {
-  if (!('fonts' in document)) {
-    Object.defineProperty(document, 'fonts', {
-      value: { addEventListener: () => {}, removeEventListener: () => {} },
-      configurable: true,
-    });
-  }
-  Element.prototype.scrollIntoView ??= () => {};
-}
-
 export const CARD_ID ='0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60';
 
 export const demoOperator: Me = {

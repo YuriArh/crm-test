@@ -1,7 +1,7 @@
 import { ActionIcon, Alert, Box, Button, Group, Pagination, Progress, Stack, Text, Title } from '@mantine/core';
-import { IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
+import { IconChevronLeft, IconChevronRight, IconPlus } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
-import { getRouteApi } from '@tanstack/react-router';
+import { getRouteApi, Link } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { useCurrentUser } from '@/auth';
 import { isApiError, NetworkError, type Role } from '@/shared/api';
@@ -33,10 +33,20 @@ function loadErrorText(error: Error): string {
     : 'Не удалось загрузить заявки. Повторите попытку позже.';
 }
 
+/** Creating requests is the initiator's job (the server allows it to initiators only). */
+function NewRequestButton({ variant = 'filled' }: { variant?: 'filled' | 'default' }) {
+  return (
+    <Button component={Link} to="/requests/new" variant={variant} leftSection={<IconPlus size={16} stroke={1.8} />}>
+      Новая заявка
+    </Button>
+  );
+}
+
 function EmptyMessage({ role }: { role: Role }) {
   return (
-    <Stack align="center" gap="xs" py="xl">
+    <Stack align="center" gap="sm" py="xl">
       <Text fw={510}>{role === 'OPERATOR' ? 'В службе пока нет заявок' : 'Заявок пока нет'}</Text>
+      {role === 'INITIATOR' && <NewRequestButton variant="default" />}
     </Stack>
   );
 }
@@ -93,13 +103,16 @@ export function RequestListPage() {
 
   return (
     <Stack gap="md">
-      <Group gap="sm" align="baseline">
-        <Title order={2}>Заявки</Title>
-        {data && (
-          <Text c="dimmed" size="lg" data-testid="request-total">
-            {data.totalElements}
-          </Text>
-        )}
+      <Group justify="space-between" wrap="nowrap">
+        <Group gap="sm" align="baseline">
+          <Title order={2}>Заявки</Title>
+          {data && (
+            <Text c="dimmed" size="lg" data-testid="request-total">
+              {data.totalElements}
+            </Text>
+          )}
+        </Group>
+        {me.role === 'INITIATOR' && <NewRequestButton />}
       </Group>
 
       {/* Desktop and phone layouts are switched by CSS, not by a JS media query: no jump on load. */}

@@ -1,0 +1,26 @@
+/* A field label with its character counter on the right of the same line. */
+.labelWithCounter {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--mantine-spacing-sm);
+  width: 100%;
+}
+
+/* On phones the buttons stick to the bottom of the screen and share its width. */
+.actions {
+  @media (max-width: $mantine-breakpoint-xs) {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    flex-wrap: nowrap;
+    margin-inline: calc(var(--mantine-spacing-lg) * -1);
+    padding: var(--mantine-spacing-sm) var(--mantine-spacing-lg);
+    background-color: var(--mantine-color-body);
+    border-top: 1px solid var(--app-color-border);
+
+    & > * {
+      flex: 1;
+    }
+  }
+}
