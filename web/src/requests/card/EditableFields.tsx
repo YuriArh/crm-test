@@ -1,4 +1,4 @@
-import { Alert, Button, Group, Select, Stack, Text, Textarea } from '@mantine/core';
+import { Alert, Button, Group, Paper, Select, Stack, Text, Textarea } from '@mantine/core';
 import { useQuery } from '@tanstack/react-query';
 import type { RequestCard } from '@/shared/api';
 import { operatorsQueryOptions } from './api';
@@ -65,6 +65,8 @@ export function AssigneeField({ card, editor }: { card: RequestCard; editor: Car
         loading={operators.isPending}
         error={editor.fieldErrors.assigneeId}
         comboboxProps={{ withinPortal: true }}
+        // The label looks like the other property labels of the panel.
+        styles={{ label: { color: 'var(--mantine-color-dimmed)', fontWeight: 400 } }}
       />
       <ConflictNote field="assigneeId" theirs={card.assignee?.displayName ?? NO_ASSIGNEE} editor={editor} />
     </Stack>
@@ -97,10 +99,33 @@ function ConflictNote({ field, theirs, editor }: { field: EditableField; theirs:
   );
 }
 
-/** «Отменить» and «Сохранить», only while there are changes; the error of the last save above them. */
-export function SaveActions({ editor }: { editor: CardEditor }) {
+/**
+ * «Отменить» and «Сохранить», only while there are changes, with the error of the last save. `inline` sits
+ * under the comment (desktop); `bar` sticks to the bottom of the screen (phone).
+ */
+export function SaveActions({ editor, variant }: { editor: CardEditor; variant: 'inline' | 'bar' }) {
   if (!editor.dirty && editor.error === null) return null;
 
+  const actions = <SaveButtons editor={editor} />;
+  if (variant === 'inline') return actions;
+  return (
+    <Paper
+      withBorder
+      shadow="md"
+      p="sm"
+      pos="sticky"
+      bottom="var(--mantine-spacing-sm)"
+      bg="var(--app-color-surface-raised)"
+      style={{ zIndex: 'var(--mantine-z-index-app)' }}
+      aria-label="Несохранённые изменения"
+      role="region"
+    >
+      {actions}
+    </Paper>
+  );
+}
+
+function SaveButtons({ editor }: { editor: CardEditor }) {
   return (
     <Group justify="flex-end" gap="sm" wrap="wrap">
       {editor.error && (
