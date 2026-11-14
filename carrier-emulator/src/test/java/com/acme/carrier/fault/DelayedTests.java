@@ -10,7 +10,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -20,6 +19,7 @@ import tools.jackson.databind.json.JsonMapper;
 import com.acme.carrier.config.CarrierProperties;
 import com.acme.carrier.execution.Executor;
 import com.acme.carrier.support.FakeSleeper;
+import com.acme.carrier.support.Feed;
 import com.acme.carrier.support.IntegrationTest;
 import com.acme.carrier.support.MutableClock;
 import com.acme.carrier.support.TestClockConfiguration;
@@ -33,7 +33,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
 
-/** {@code delayed} fault mode (docs/specs/carrier-faults.md §3.4). */
+/** Fault mode {@code delayed} ({@code docs/specs/carrier-faults.md} §3.4). */
 @IntegrationTest
 class DelayedTests {
 
@@ -60,7 +60,7 @@ class DelayedTests {
 
     @BeforeEach
     void setUp() {
-        start = lastSeq();
+        start = Feed.lastSeq(jdbc);
         delay = properties.faults().delayedResultDelay();
     }
 
@@ -227,6 +227,40 @@ class DelayedTests {
         assertThat(publishAt(id)).isNull();
     }
 
+    @Test
+    void deferredPublicationIsDuplicatedTooWithDuplicate() throws Exception {
+        faults.set(new Faults(false, false, true, true));
+        UUID id = submitted();
+        faults.set(Faults.OFF);
+        executor.runOnce();
+        assertThat(feed(id)).isEmpty();
+        JsonNode state = json(mockMvc.perform(get("/operations/{id}", id))
+                .andExpect(status().isOk())
+                .andExpect(matchesContract())
+                .andReturn().getResponse().getContentAsString());
+        String resultMessageId = state.get("result").get("messageId").asString();
+        UUID inProgressMessageId = jdbc.sql("SELECT in_progress_message_id FROM operation WHERE operation_id = :id")
+                .param("id", id).query(UUID.class).single();
+        mockMvc.perform(get("/admin/operations").param("operationId", id.toString()))
+                .andExpect(status().isOk())
+                .andExpect(matchesContract())
+                .andExpect(jsonPath("$.items[0].faults", Matchers.contains("DUPLICATE", "DELAYED")));
+
+        clock.advance(delay);
+        assertThat(executor.publishDue()).isEqualTo(1);
+
+        List<JsonNode> entries = feed(id);
+        assertThat(entries).hasSize(4);
+        DuplicateTests.assertDuplicatePair(entries.get(0), entries.get(1));
+        DuplicateTests.assertDuplicatePair(entries.get(2), entries.get(3));
+        assertThat(entries.get(0).get("sequence").asInt()).isEqualTo(2);
+        assertThat(entries.get(0).get("messageId").asString()).isEqualTo(resultMessageId);
+        assertThat(entries.get(2).get("sequence").asInt()).isEqualTo(1);
+        assertThat(entries.get(2).get("status").asString()).isEqualTo("IN_PROGRESS");
+        assertThat(entries.get(2).get("messageId").asString()).isEqualTo(inProgressMessageId.toString());
+        assertThat(publishAt(id)).isNull();
+    }
+
     private UUID submitted() throws Exception {
         UUID id = UUID.randomUUID();
         mockMvc.perform(submit(body(id))).andExpect(status().isAccepted()).andExpect(matchesContract());
@@ -235,18 +269,7 @@ class DelayedTests {
 
     /** Feed entries of one operation published since the test started, in feed order. */
     private List<JsonNode> feed(UUID operationId) throws Exception {
-        JsonNode page = json(mockMvc.perform(get("/results").param("after", String.valueOf(start))
-                        .param("limit", "100"))
-                .andExpect(status().isOk())
-                .andExpect(matchesContract())
-                .andReturn().getResponse().getContentAsString());
-        List<JsonNode> entries = new ArrayList<>();
-        for (JsonNode item : page.get("items")) {
-            if (item.get("operationId").asString().equals(operationId.toString())) {
-                entries.add(item);
-            }
-        }
-        return entries;
+        return Feed.of(mockMvc, start, operationId);
     }
 
     private Instant publishAt(UUID operationId) {
@@ -258,10 +281,5 @@ class DelayedTests {
 
     private static JsonNode json(String content) {
         return JSON.readTree(content);
-    }
-
-    private long lastSeq() {
-        return jdbc.sql("SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM feed_entry_feed_seq_seq")
-                .query(Long.class).single();
     }
 }

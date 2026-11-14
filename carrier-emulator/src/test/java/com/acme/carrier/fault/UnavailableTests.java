@@ -13,6 +13,7 @@ import java.util.UUID;
 
 import com.acme.carrier.execution.Executor;
 import com.acme.carrier.support.FakeSleeper;
+import com.acme.carrier.support.Feed;
 import com.acme.carrier.support.IntegrationTest;
 import com.acme.carrier.support.MutableClock;
 import com.acme.carrier.support.TestRows;
@@ -24,6 +25,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
+/** Fault mode {@code unavailable} ({@code docs/specs/carrier-faults.md} §3.1). */
 @IntegrationTest
 class UnavailableTests {
 
@@ -55,6 +57,17 @@ class UnavailableTests {
 
         expectUnavailable(mockMvc.perform(submit(body(id))));
 
+        assertThat(operationCount(id)).isZero();
+    }
+
+    @Test
+    void unavailableWinsOverLoseResponse() throws Exception {
+        faults.set(new Faults(true, true, false, false));
+        UUID id = UUID.randomUUID();
+
+        expectUnavailable(mockMvc.perform(submit(body(id))));
+
+        assertThat(sleeper.pauses()).isEmpty();
         assertThat(operationCount(id)).isZero();
     }
 
@@ -110,7 +123,7 @@ class UnavailableTests {
 
     @Test
     void executorKeepsExecutingAndPublishingAcceptedOperations() throws Exception {
-        long start = lastFeedSeq();
+        long start = Feed.lastSeq(jdbc);
         UUID id = UUID.randomUUID();
         mockMvc.perform(submit(body(id))).andExpect(status().isAccepted());
         faults.set(UNAVAILABLE);
@@ -167,9 +180,5 @@ class UnavailableTests {
     private int operationCount(UUID id) {
         return jdbc.sql("SELECT count(*) FROM operation WHERE operation_id = :id")
                 .param("id", id).query(Integer.class).single();
-    }
-
-    private long lastFeedSeq() {
-        return jdbc.sql("SELECT coalesce(max(feed_seq), 0) FROM feed_entry").query(Long.class).single();
     }
 }

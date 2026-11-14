@@ -34,6 +34,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+/** Fault mode {@code loseResponse} ({@code docs/specs/carrier-faults.md} §3.2). */
 @IntegrationTest
 class LoseResponseTests {
 

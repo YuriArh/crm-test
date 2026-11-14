@@ -14,12 +14,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * The {@code loseResponse} fault mode ({@code docs/specs/carrier-faults.md} §3.2): holds the response to the first
- * receipt of an operation until the operation is executed and {@code carrier.faults.lose-response-delay} has passed
- * since the receipt started, so the client gives up waiting and the response is lost after execution.
+ * Fault mode {@code loseResponse}: holds the response to the first receipt of an operation until the operation is
+ * executed and {@code carrier.faults.lose-response-delay} has passed since the receipt started, so the client has
+ * given up waiting and the response is lost after execution. If the operation is not executed by then, the
+ * response is released anyway.
  * <p>
- * Called after the receipt transaction has committed; it holds no transaction and no database connection while
- * pausing (each state check borrows a connection for one query).
+ * Called after the receipt transaction has committed. It holds no transaction and no database connection while
+ * pausing: each state check borrows a connection for one query.
  */
 @Component
 public class LostResponse {
@@ -41,50 +42,45 @@ public class LostResponse {
         this.delay = properties.faults().loseResponseDelay();
     }
 
-    /**
-     * Returns once the operation is executed and the delay has passed since {@code startedAt}, or once the delay
-     * has passed if the operation is still not executed (logged as a warning).
-     */
+    /** Returns once the delay has passed since {@code startedAt}; polls the operation's state until executed. */
     public void hold(UUID operationId, Instant startedAt) {
-        log.warn("loseResponse: holding the response for operationId {} until it is executed and {} has passed",
+        log.warn("Fault loseResponse: response to operation {} held until it is executed and {} has passed",
                 operationId, delay);
         boolean executed = false;
-        // Pauses requested so far: a lower bound of the elapsed time, so the loop ends even if the clock stands still.
+        // The pauses taken so far bound the elapsed time from below, so the hold ends even if the clock stands still.
         Duration slept = Duration.ZERO;
         try {
-            while (true) {
-                if (!executed) {
-                    executed = isExecuted(operationId);
-                }
-                Duration elapsed = max(Duration.between(startedAt, clock.instant()), slept);
-                Duration left = delay.minus(elapsed);
-                if (!left.isPositive()) {
-                    break;
-                }
-                Duration pause = executed || left.compareTo(POLL_INTERVAL) < 0 ? left : POLL_INTERVAL;
+            Duration left;
+            while ((left = delay.minus(max(Duration.between(startedAt, clock.instant()), slept))).isPositive()) {
+                executed = executed || isExecuted(operationId);
+                Duration pause = executed ? left : min(left, POLL_INTERVAL);
                 sleeper.sleep(pause);
                 slept = slept.plus(pause);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            log.warn("loseResponse: hold for operationId {} interrupted, responding now", operationId);
+            log.warn("Fault loseResponse: hold of operation {} interrupted, responding now", operationId);
             return;
         }
         if (executed || isExecuted(operationId)) {
-            log.warn("loseResponse: releasing the held response for operationId {} (executed)", operationId);
+            log.warn("Fault loseResponse: operation {} executed, releasing the held response", operationId);
         } else {
-            log.warn("loseResponse: operationId {} is still not executed after {}, responding anyway",
+            log.warn("Fault loseResponse: operation {} still not executed after {}, releasing the response anyway",
                     operationId, delay);
         }
-    }
-
-    private static Duration max(Duration a, Duration b) {
-        return a.compareTo(b) >= 0 ? a : b;
     }
 
     private boolean isExecuted(UUID operationId) {
         return operations.find(operationId)
                 .map(operation -> operation.state() == OperationStateValue.EXECUTED)
                 .orElse(false);
+    }
+
+    private static Duration max(Duration a, Duration b) {
+        return a.compareTo(b) >= 0 ? a : b;
+    }
+
+    private static Duration min(Duration a, Duration b) {
+        return a.compareTo(b) <= 0 ? a : b;
     }
 }

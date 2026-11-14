@@ -54,7 +54,7 @@ public class UnavailableFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
             return;
         }
-        log.warn("Fault unavailable: refused {} {} with 503", request.getMethod(), pathWithinApplication(request));
+        log.warn("Fault unavailable: {} {} refused with 503", request.getMethod(), pathWithinApplication(request));
         ErrorCode code = ErrorCode.UNAVAILABLE;
         response.setStatus(code.status().value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);

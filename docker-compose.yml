@@ -66,6 +66,10 @@ services:
       DB_USER: ${CARRIER_DB_USER:-carrier}
       DB_PASSWORD: ${CARRIER_DB_PASSWORD:-carrier}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Fault mode delays (docs/specs/carrier-faults.md §5). loseResponse must hold the response longer than
+      # dispatch waits for it: 10 s here > dispatch's 5 s response timeout (CARRIER_READ_TIMEOUT).
+      CARRIER_LOSE_RESPONSE_DELAY: ${CARRIER_LOSE_RESPONSE_DELAY:-10s}
+      CARRIER_DELAYED_RESULT_DELAY: ${CARRIER_DELAYED_RESULT_DELAY:-15s}
     # Published for checks from the host (make carrier-ops, e2e); dispatch reaches it inside the network.
     ports:
       - "${CARRIER_PORT:-8081}:8081"
