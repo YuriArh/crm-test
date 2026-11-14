@@ -9,9 +9,11 @@ import {
   Textarea,
   TextInput,
   Title,
+  useMantineTheme,
 } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useForm } from '@mantine/form';
+import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { IconArrowLeft, IconCalendar, IconInfoCircle } from '@tabler/icons-react';
 import { Link, useNavigate } from '@tanstack/react-router';
@@ -19,12 +21,14 @@ import { useState } from 'react';
 import { isApiError, isTransient, type CreateRequest } from '@/shared/api';
 import { todayIn, useBusinessTimezone } from '@/shared/system';
 import { useCreateRequest } from './api';
+import { CancelCreateModal } from './CancelCreateModal';
 import { ConfirmCreateModal } from './ConfirmCreateModal';
 import classes from './CreateRequestPage.module.css';
 import {
   ADDRESS_MAX,
   CARGO_MAX,
   EMPTY_FORM,
+  isFilled,
   serverFieldErrors,
   toCreateRequest,
   validateCreate,
@@ -68,6 +72,9 @@ export function CreateRequestPage() {
   const [confirming, setConfirming] = useState(false);
   const [body, setBody] = useState<CreateRequest | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const theme = useMantineTheme();
+  const isPhone = useMediaQuery(`(max-width: ${theme.breakpoints.xs})`) ?? false;
 
   // A valid form opens «Проверьте данные» with the body exactly as it will be sent.
   const submit = form.onSubmit((valid) => {
@@ -99,12 +106,20 @@ export function CreateRequestPage() {
     );
   };
 
+  // Leaving a filled form asks first; an empty one just goes back to the registry.
+  const leaveUnlessFilled = (event: React.MouseEvent) => {
+    if (isFilled(form.getValues())) {
+      event.preventDefault();
+      setCancelling(true);
+    }
+  };
+
   const { values } = form;
 
   return (
     <Stack maw="40rem" mx="auto" gap="lg">
       <Stack gap="xs">
-        <Anchor component={Link} to="/requests" size="sm" c="dimmed">
+        <Anchor component={Link} to="/requests" size="sm" c="dimmed" onClick={leaveUnlessFilled}>
           <Group gap={4} component="span">
             <IconArrowLeft size={14} aria-hidden />
             Заявки
@@ -148,6 +163,8 @@ export function CreateRequestPage() {
               valueFormat="DD.MM.YYYY"
               minDate={today}
               defaultDate={today}
+              // On phones the calendar opens in a modal window instead of a dropdown under the field.
+              dropdownType={isPhone ? 'modal' : 'popover'}
               leftSection={<IconCalendar size={16} aria-hidden />}
               leftSectionPointerEvents="none"
               {...form.getInputProps('deadline')}
@@ -175,8 +192,9 @@ export function CreateRequestPage() {
             </Alert>
           )}
 
-          <Group justify="flex-end" gap="sm">
-            <Button variant="default" component={Link} to="/requests">
+          {/* On phones this bar sticks to the bottom of the screen (CreateRequestPage.module.css). */}
+          <Group justify="flex-end" gap="sm" className={classes.actions}>
+            <Button variant="default" component={Link} to="/requests" onClick={leaveUnlessFilled}>
               Отмена
             </Button>
             <Button type="submit">Создать заявку</Button>
@@ -190,6 +208,14 @@ export function CreateRequestPage() {
         sending={create.isPending}
         onEdit={() => setConfirming(false)}
         onConfirm={confirm}
+      />
+      <CancelCreateModal
+        opened={cancelling}
+        onStay={() => setCancelling(false)}
+        onLeave={() => {
+          setCancelling(false);
+          void navigate({ to: '/requests' });
+        }}
       />
     </Stack>
   );

@@ -336,6 +336,43 @@ describe('CreateRequestPage: confirmation and sending', () => {
   });
 });
 
+describe('CreateRequestPage: cancel', () => {
+  it('goes straight back to the registry from an empty form', async () => {
+    const { user, history } = await openForm();
+
+    await user.click(screen.getByRole('link', { name: 'Отмена' }));
+
+    await waitFor(() => expect(history.location.pathname).toBe('/requests'));
+    expect(screen.queryByRole('dialog', { name: 'Отменить создание?' })).not.toBeInTheDocument();
+  });
+
+  it('asks before leaving a filled form and stays on «Продолжить заполнение»', async () => {
+    const { user, history } = await openForm();
+    await user.type(screen.getByRole('textbox', { name: 'Груз' }), 'Паллеты');
+
+    await user.click(screen.getByRole('link', { name: 'Отмена' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Отменить создание?' });
+    expect(within(dialog).getByText('Введённые данные пропадут.')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Продолжить заполнение' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Отменить создание?' })).not.toBeInTheDocument());
+    expect(history.location.pathname).toBe('/requests/new');
+    expect(screen.getByRole('textbox', { name: 'Груз' })).toHaveValue('Паллеты');
+  });
+
+  it('leaves a filled form on «Отменить создание», also from the back link', async () => {
+    const { user, history } = await openForm();
+    await user.type(screen.getByRole('textbox', { name: 'Вес, кг' }), '5');
+
+    await user.click(screen.getByRole('link', { name: 'Заявки' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Отменить создание?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Отменить создание' }));
+
+    await waitFor(() => expect(history.location.pathname).toBe('/requests'));
+  });
+});
+
 describe('CreateRequestPage: access', () => {
   it('answers "not found" to an operator', async () => {
     renderApp('/requests/new', { me: operator });

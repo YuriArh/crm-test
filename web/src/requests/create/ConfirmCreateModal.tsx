@@ -42,14 +42,18 @@ export function ConfirmCreateModal({ opened, body, sending, onEdit, onConfirm }:
       onClose={() => {
         if (!sending) onEdit();
       }}
-      title="Проверьте данные"
+      title={
+        <Text component="span" size="lg" fw={590}>
+          Проверьте данные
+        </Text>
+      }
       centered
       closeOnClickOutside={!sending}
       closeOnEscape={!sending}
       withCloseButton={!sending}
     >
       {body && (
-        <Stack gap="lg">
+        <Stack gap="lg" pt="xs">
           <Stack gap="sm">
             <Row label="Груз">{body.cargoDescription}</Row>
             <Row label="Вес">{formatWeight(body.weightKg)}</Row>
