@@ -193,5 +193,15 @@ make web-e2e       # Playwright: against the dev server, then against the stack 
   Any page opened without a session leads to the login page and back afterwards. The header shows the user,
   role and service, and has the sign-out button. When the session is lost (sign-out in another tab,
   `dispatch` restarted) the next action leads to the login page.
+- Requests: after sign-in the registry opens (`/requests`). Filters «Результат», «Доставка» (operators) and
+  «Только просроченные», the sort and the page are kept in the address, so a link or Back restores them; on a
+  phone the table becomes cards and the filters move into a bottom sheet. The list refreshes itself every 10 s.
+- Initiators create a request with «Новая заявка»: the form checks the fields, shows «Проверьте данные», and
+  then sends; a repeated click or a retry after a lost answer creates one request. The deadline cannot be
+  before today in the business time zone.
+- The request card shows the content (read-only — it cannot change after creation), both statuses, the
+  carrier's result and, for operators, the exchange details; it refreshes every 5 s until the result is final.
+  Anyone who sees the request can edit the comment, operators choose the assignee; if someone else changed
+  the same field meanwhile, nothing is overwritten silently.
 - `make web-e2e` runs the browser tests against the stack as it was built: after changing `web/`, rebuild it
   with `make up` (or `docker compose up -d --build web`) first.
