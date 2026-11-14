@@ -1,5 +1,6 @@
-import { createRoute, Outlet } from '@tanstack/react-router';
+import { createRoute } from '@tanstack/react-router';
 import { rootRoute } from '@/app/rootRoute';
+import { AuthenticatedLayout } from './AuthenticatedLayout';
 import { redirectIfSignedIn, requireAuth } from './guards';
 import { LoginPage } from './LoginPage';
 
@@ -25,5 +26,5 @@ export const authenticatedRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: '_authenticated',
   beforeLoad: ({ context, location }) => requireAuth(context.queryClient, location.href),
-  component: Outlet,
+  component: AuthenticatedLayout,
 });

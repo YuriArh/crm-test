@@ -26,6 +26,19 @@ async function fetchMe(): Promise<Me | null> {
   return data;
 }
 
+/**
+ * Signs out. The local session ends even when the call fails (e.g. the session was already gone): the
+ * cache is cleared before the caller navigates. The server clears the CSRF cookie; the data layer
+ * fetches a new token on the next mutating call.
+ */
+export function useLogout() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => unwrap(api.POST('/api/auth/logout')),
+    onSettled: () => replaceSession(queryClient, null),
+  });
+}
+
 /** Signs in; on success the cache holds only the new user. The CSRF token rotates, the data layer reads it anew. */
 export function useLogin() {
   const queryClient = useQueryClient();
