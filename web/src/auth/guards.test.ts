@@ -1,9 +1,9 @@
 import { QueryClient } from '@tanstack/react-query';
-import { isRedirect } from '@tanstack/react-router';
+import { isNotFound, isRedirect } from '@tanstack/react-router';
 import { describe, expect, it } from 'vitest';
 import type { Me } from '@/shared/api';
 import { meKey } from './api';
-import { redirectIfSignedIn, requireAuth } from './guards';
+import { redirectIfSignedIn, requireAuth, requireRole } from './guards';
 
 const me: Me = {
   id: 'u1',
@@ -55,5 +55,19 @@ describe('redirectIfSignedIn', () => {
     const error = await thrown(redirectIfSignedIn(clientWith(me), 'https://evil.example'));
 
     expect(error).toMatchObject({ options: { href: '/' } });
+  });
+});
+
+describe('requireRole', () => {
+  it('lets the right role through and answers not found to anyone else', () => {
+    expect(() => requireRole(me, 'INITIATOR')).not.toThrow();
+
+    let error: unknown;
+    try {
+      requireRole(me, 'OPERATOR');
+    } catch (thrown) {
+      error = thrown;
+    }
+    expect(isNotFound(error)).toBe(true);
   });
 });

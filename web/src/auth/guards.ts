@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
-import { redirect } from '@tanstack/react-router';
-import type { Me } from '@/shared/api';
+import { notFound, redirect } from '@tanstack/react-router';
+import type { Me, Role } from '@/shared/api';
 import { meQueryOptions } from './api';
 import { safeNext } from './safeNext';
 
@@ -15,6 +15,16 @@ export async function requireAuth(queryClient: QueryClient, href: string): Promi
     throw redirect({ to: '/login', search: { next: href } });
   }
   return { me };
+}
+
+/**
+ * `beforeLoad` of a screen for one role: anyone else gets "not found", the same as the server answers for
+ * what is outside the caller's scope. Convenience only; dispatch enforces the role (NF02).
+ */
+export function requireRole(me: Me, role: Role): void {
+  if (me.role !== role) {
+    throw notFound();
+  }
 }
 
 /** `beforeLoad` of the login page: a signed-in user goes on to `next` right away. */
