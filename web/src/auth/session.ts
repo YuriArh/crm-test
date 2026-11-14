@@ -12,3 +12,14 @@ export function replaceSession(queryClient: QueryClient, me: Me | null): void {
   });
   queryClient.setQueryData(meKey, me);
 }
+
+/**
+ * The session is gone (`401 UNAUTHENTICATED` from any call: sign-out in another tab, dispatch
+ * restarted): forget the user and go to the login page, which brings the user back afterwards.
+ * Parallel calls fail together; only the first one acts.
+ */
+export function handleSessionLost(queryClient: QueryClient, goToLogin: () => void): void {
+  if (queryClient.getQueryData(meKey) === null) return;
+  replaceSession(queryClient, null);
+  goToLogin();
+}

@@ -1,8 +1,19 @@
-import { QueryClient } from '@tanstack/react-query';
-import { isTransient } from '@/shared/api';
+import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query';
+import { isApiError, isTransient } from '@/shared/api';
 
-export function createQueryClient(): QueryClient {
+export type QueryClientOptions = {
+  /** Called when any query or mutation fails with `401 UNAUTHENTICATED`: the session is gone. */
+  onUnauthenticated?: () => void;
+};
+
+export function createQueryClient(options: QueryClientOptions = {}): QueryClient {
+  const onError = (error: Error) => {
+    if (isApiError(error, 'UNAUTHENTICATED')) options.onUnauthenticated?.();
+  };
+
   return new QueryClient({
+    queryCache: new QueryCache({ onError }),
+    mutationCache: new MutationCache({ onError }),
     defaultOptions: {
       queries: {
         // Only a broken connection or a server failure may pass on a repeat; 4xx answers never do.

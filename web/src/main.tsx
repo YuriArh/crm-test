@@ -4,12 +4,10 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createQueryClient } from '@/app/queryClient';
-import { createAppRouter } from '@/app/router';
+import { createApp } from '@/app/createApp';
 import { theme } from '@/app/theme';
 
-const queryClient = createQueryClient();
-const router = createAppRouter(queryClient);
+const { queryClient, router } = createApp();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
