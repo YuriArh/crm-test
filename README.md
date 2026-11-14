@@ -10,6 +10,7 @@ dispatch/          main application: accepts delivery requests, dispatches them
 carrier-emulator/  emulator of the external delivery carrier (own database `carrier`)
 contracts/         OpenAPI contracts (dispatch-api.yaml: web ↔ dispatch, carrier-api.yaml: dispatch ↔ carrier)
 docker/            PostgreSQL init script (creates the carrier database)
+web/               web client: React + TypeScript + Vite + Mantine, served by nginx in Docker
 docs/              plan and documentation
 ```
 
@@ -17,18 +18,21 @@ docs/              plan and documentation
 
 - Docker with Docker Compose
 - JDK 25 — only to build and run `dispatch` outside Docker
+- Node.js 22 with corepack (pnpm) — only to develop `web/` outside Docker
 
 ## Run
 
 ```bash
 cp .env.example .env
-make up        # build and start postgres + dispatch + carrier-emulator
+make up        # build and start postgres + dispatch + carrier-emulator + web
 make ps        # service status
 ```
 
 Check: `curl http://localhost:8080/actuator/health`, `curl http://localhost:8080/api/system/info` and `curl http://localhost:8081/actuator/health` (emulator).
 
-If port 5432, 8080 or 8081 is already taken, change `DB_PORT` / `DISPATCH_PORT` / `CARRIER_PORT` in `.env`. Both `docker compose` and `make run` read it.
+The web client is at http://localhost:3000. It and the API share this origin: nginx serves the static build and proxies `/api` to `dispatch`.
+
+If port 5432, 8080, 8081 or 3000 is already taken, change `DB_PORT` / `DISPATCH_PORT` / `CARRIER_PORT` / `WEB_PORT` in `.env`. Both `docker compose` and `make run` read it.
 
 The emulator's database is created by `docker/postgres/init` only when the PostgreSQL volume is empty. If the stack was started before the emulator existed, run `make reset` once (it deletes local data).
 
@@ -146,3 +150,19 @@ make test      # tests; integration tests use Testcontainers, so Docker must be 
 - Instants are stored and processed in UTC; the business time zone is `APP_TIMEZONE` (default `Europe/Moscow`).
 - The database schema is managed only by Flyway migrations (`dispatch/src/main/resources/db/migration`).
 - Data access: Spring Data JDBC for entities, explicit SQL via `JdbcClient` for the exchange core; no JPA/Hibernate.
+
+## Web client
+
+```bash
+make web-install   # once: install web/ dependencies and the Playwright browser
+make web-dev       # http://localhost:5173, proxies /api to dispatch on :8080 (make run or make up)
+make web-build     # contract types check, typecheck, unit tests, production build
+make web-e2e       # Playwright: against the dev server, then against the stack on :3000 (make up first)
+```
+
+- Stack: React 19, TypeScript (strict), Vite, TanStack Router, TanStack Query, Mantine; pnpm project outside Gradle.
+- Modular structure: `src/app/` wires the app (query client, router, theme), `src/shared/` holds code used by
+  several modules, each feature module gets its own folder (and its own `e2e/<module>/` folder).
+- Data layer `src/shared/api/`: types generated from `contracts/dispatch-api.yaml`, one HTTP client with the
+  CSRF header and Problem Details errors. After changing the contract run `make web-api-types`;
+  `make web-build` fails while the types are out of date.

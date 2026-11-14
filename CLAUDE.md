@@ -25,7 +25,12 @@ Domain: a cargo delivery request (cargo, weight, address, deadline). Lifecycle: 
   - `execution` — `Executor` (single scheduler thread, the only feed writer: `ACCEPTED → EXECUTED` by conditional `UPDATE`, publishes `IN_PROGRESS` + final), `OutcomePolicy` (pure, deterministic);
   - `feed` — `GET /results`; `admin` — `GET /admin/operations`; `web` — `{code, message}` errors; `config` — `Clock`, UUIDv7, `CarrierProperties`.
   - Tests: `@IntegrationTest` (Testcontainers, fixed clock, executor off — call `Executor.runOnce()`); every MockMvc response is checked against `contracts/carrier-api.yaml` with `Contract.matchesContract()` — keep doing that in new tests.
-- `contracts/` — OpenAPI contracts (`dispatch-api.yaml` for dispatch↔web client, `carrier-api.yaml` for dispatch↔carrier-emulator); `carrier-api.yaml` also holds the exchange rules and the emulator's `admin` endpoints. Every MockMvc response of a `dispatch` `@IntegrationTest` is validated against `dispatch-api.yaml` automatically (`support/ContractConfiguration` + `Contract`): every called path and method must be in the contract and every response must match it; request bodies and parameters are not checked. An endpoint added without a contract change fails the build (`ContractCheckTests`). A test that calls outside the contract on purpose sets the header `Contract.SKIP_HEADER` with the reason; actuator is exempt. Lint with `make contracts-lint` after every change in `contracts/`. `dispatch` and `carrier-emulator` must **not share Java classes**: the emulator stands in for an external system, so the contract in `contracts/` is the only agreement between them.
+- `contracts/` — OpenAPI contracts (`dispatch-api.yaml` for dispatch↔web client, `carrier-api.yaml` for dispatch↔carrier-emulator); `carrier-api.yaml` also holds the exchange rules and the emulator's `admin` endpoints. Every MockMvc response of a `dispatch` `@IntegrationTest` is validated against `dispatch-api.yaml` automatically (`support/ContractConfiguration` + `Contract`): every called path and method must be in the contract and every response must match it; request bodies and parameters are not checked. An endpoint added without a contract change fails the build (`ContractCheckTests`). A test that calls outside the contract on purpose sets the header `Contract.SKIP_HEADER` with the reason; actuator is exempt. After changing `dispatch-api.yaml` run `make web-api-types`. Lint with `make contracts-lint` after every change in `contracts/`. `dispatch` and `carrier-emulator` must **not share Java classes**: the emulator stands in for an external system, so the contract in `contracts/` is the only agreement between them.
+- `web/` — the web client, rebuilt from scratch: React 19 + TypeScript (strict, pinned to 6.0) + Vite, TanStack Router, TanStack Query, Mantine; a separate pnpm project (not in Gradle; pnpm pinned by `packageManager`). The UI and the API share one origin (Vite proxy in dev, nginx in Docker on port 3000, `web/nginx.conf`), so session cookies work without CORS. No routes or screens yet.
+  - Modular structure: `src/app/` wires the app (`queryClient`, `router`, `theme`); `src/shared/` is code used by several modules; each feature module gets its own `src/<module>/` and `e2e/<module>/`. Import with `@/…` (= `src/`).
+  - `src/shared/api/` — the data layer, the only code that talks HTTP to dispatch; import from `@/shared/api`. `schema.d.ts` is generated from `dispatch-api.yaml` (do not edit; `pnpm api:check` fails when stale), `types.ts` names its schemas, `client.ts` (`openapi-fetch`; CSRF header from the cookie on every mutating call, one repeat after `403 CSRF_INVALID` with a fresh token, `NetworkError`; `unwrap()` returns data or throws), `errors.ts` (`ApiError` with `code`, `fieldErrors`, `current`; `isTransient` = network or 5xx — the only errors queries retry).
+  - UI: Mantine components and the one theme in `src/app/theme.ts`; no custom colours or sizes.
+  - Tests: Vitest (`*.test.ts(x)` next to the code, only under `src/`); Playwright in `web/e2e/<module>/`. Without `WEB_BASE_URL` Playwright starts the Vite dev server (tests that import source modules, like `e2e/shared/api.spec.ts`, run only there and need dispatch on :8080); with it, it tests the Docker stack.
 
 Gradle multi-project build: the root `build.gradle.kts` configures the Java 25 toolchain, `-parameters`, JUnit Platform, and `user.timezone=UTC` for tests in all subprojects. Plugin versions live in `gradle/libs.versions.toml`; library versions come from the Spring Boot BOM and are not pinned.
 
@@ -33,7 +38,7 @@ Gradle multi-project build: the root `build.gradle.kts` configures the Java 25 t
 
 ```bash
 cp .env.example .env   # first time
-make up                # build and start postgres + dispatch + carrier-emulator in Docker
+make up                # build and start postgres + dispatch + carrier-emulator + web (:3000) in Docker
 make db                # only PostgreSQL (for running dispatch from the IDE)
 make run               # make db + ./gradlew :dispatch:bootRun
 make test              # ./gradlew test — needs Docker running (Testcontainers)
@@ -43,9 +48,16 @@ make logs              # follow dispatch logs (make logs-carrier — emulator)
 make e2e               # e2e tests against the running stack (waits for both services first)
 make carrier-ops       # emulator operations with receivedCount / executionCount
 make contracts-lint    # lint contracts/ (Redocly CLI in Docker)
+make web-install       # install web/ dependencies and Chromium for Playwright (once)
+make web-dev           # web client on :5173 against dispatch on :8080
+make web-build         # contract types check + typecheck + Vitest + production build of web/
+make web-e2e           # Playwright against the dev server, then against the stack on :3000 (after make up)
+make web-api-types     # regenerate web/src/shared/api/schema.d.ts from contracts/dispatch-api.yaml
 ```
 
-Verification gate for every change: `./gradlew build` (unit + integration) green, then `make up && make e2e` green. Changes in `contracts/` also need `make contracts-lint` green.
+Verification gate for every change: `./gradlew build` (unit + integration) green, then `make up && make e2e` green. Changes in `contracts/` also need `make contracts-lint` green. Changes in `web/` need `make web-build` and `make web-e2e` green.
+
+Single web test: `cd web && pnpm vitest run src/shared/api/client.test.ts` (or `-t '<name>'`); single scenario: `cd web && pnpm e2e -g '<title>'`.
 
 Single test class / method:
 

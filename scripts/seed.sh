@@ -103,4 +103,4 @@ for entry in "${ids[@]}"; do
   final_card "$user" "$id" | jq -r --arg u "$user" \
     '"  \(.number)  \($u)  \(.businessStatus)  \(.result.trackingNumber // .result.rejectionReason)"'
 done
-echo "Done. Sign in as north.initiator / north.operator / south.initiator (password $PASSWORD)."
+echo "Done. Sign in at the web client as north.initiator / north.operator / south.initiator (password $PASSWORD)."

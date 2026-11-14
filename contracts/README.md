@@ -7,7 +7,7 @@ OpenAPI descriptions of the exchange contracts:
   applicability of results, reconciliation) and the emulator's own `admin` endpoints;
 - `dispatch-api.yaml` — API of `dispatch` for the web client: session and CSRF, access scope, errors,
   idempotent create, optimistic locking. Every response of the `dispatch` integration tests is checked
-  against it.
+  against it; `web/` generates its TypeScript types from it (`make web-api-types`).
 
 Rules:
 
