@@ -1,9 +1,8 @@
 name: exchange
 
-# Resource budget (NF08): dispatch + postgres + carrier-emulator together get at most
-# 2 CPUs and 4 GiB. Split: postgres 0.6 CPU / 1.25 GiB, dispatch 0.8 CPU / 1.5 GiB,
-# carrier-emulator 0.4 CPU / 0.75 GiB (total 1.8 CPU / 3.5 GiB). The web static server (nginx) is
-# outside that budget but kept tiny anyway: 0.1 CPU / 64 MiB.
+# Resource budget (NF08): the whole stack gets at most 2 CPUs and 4 GiB. Split: postgres 0.6 CPU /
+# 1.25 GiB, dispatch 0.8 CPU / 1.5 GiB, carrier-emulator 0.4 CPU / 0.75 GiB, web (nginx: static files
+# and the /api proxy every browser call goes through) 0.2 CPU / 64 MiB (total 2.0 CPU / ~3.56 GiB).
 
 services:
   postgres:
@@ -91,7 +90,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.1"
+          cpus: "0.2"
           memory: 64M
 
 volumes:

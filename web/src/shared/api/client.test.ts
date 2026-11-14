@@ -6,10 +6,15 @@ const BASE = 'http://dispatch.test';
 
 type Call = { method: string; path: string; csrf: string | null };
 
-/** A fake dispatch: answers by a handler and keeps the `XSRF-TOKEN` cookie like a browser would. */
-function fakeServer(handler: (call: Call, index: number) => Response) {
+/**
+ * A fake dispatch that keeps the `XSRF-TOKEN` cookie like a browser would and checks CSRF like dispatch
+ * does: a mutating call passes when its header equals the cookie; `/api/auth/csrf` issues a token only
+ * when there is none and otherwise returns the current one.
+ */
+function fakeServer(handler: (call: Call, server: { clearCookie: () => void }) => Response) {
   const calls: Call[] = [];
-  let cookies = '';
+  let token: string | undefined;
+  const control = { clearCookie: () => (token = undefined) };
   const fetch = async (input: RequestInfo | URL): Promise<Response> => {
     const request = input as Request;
     const call = {
@@ -19,13 +24,20 @@ function fakeServer(handler: (call: Call, index: number) => Response) {
     };
     calls.push(call);
     if (call.path === '/api/auth/csrf') {
-      cookies = `JSESSIONID=s; XSRF-TOKEN=token-${calls.length}`;
-      return json(200, { token: `token-${calls.length}` });
+      token ??= `token-${calls.length}`;
+      return json(200, { headerName: CSRF_HEADER, token });
     }
-    return handler(call, calls.length - 1);
+    if (call.method !== 'GET' && (token === undefined || call.csrf !== token)) {
+      return problem(403, 'CSRF_INVALID');
+    }
+    return handler(call, control);
   };
-  const client = createApiClient({ baseUrl: BASE, fetch, readCookies: () => cookies });
-  return { client, calls, setCookies: (value: string) => (cookies = value) };
+  const client = createApiClient({
+    baseUrl: BASE,
+    fetch,
+    readCookies: () => (token === undefined ? 'JSESSIONID=s' : `JSESSIONID=s; XSRF-TOKEN=${token}`),
+  });
+  return { client, calls, setToken: (value: string) => (token = value) };
 }
 
 function json(status: number, body: unknown): Response {
@@ -53,11 +65,12 @@ describe('createApiClient', () => {
 
   it('puts the current cookie value into the CSRF header of a mutating call', async () => {
     const server = fakeServer(() => json(200, {}));
-    server.setCookies('XSRF-TOKEN=abc%3D');
+    server.setToken('abc');
 
-    await server.client.POST('/api/auth/login', { body: login });
+    const { response } = await server.client.POST('/api/auth/login', { body: login });
 
-    expect(server.calls).toEqual([{ method: 'POST', path: '/api/auth/login', csrf: 'abc=' }]);
+    expect(response.status).toBe(200);
+    expect(server.calls).toEqual([{ method: 'POST', path: '/api/auth/login', csrf: 'abc' }]);
   });
 
   it('fetches a token first when there is no CSRF cookie', async () => {
@@ -71,23 +84,45 @@ describe('createApiClient', () => {
     ]);
   });
 
-  it('refreshes the token and repeats once on 403 CSRF_INVALID', async () => {
-    const server = fakeServer((call) => (call.csrf === 'stale' ? problem(403, 'CSRF_INVALID') : json(200, {})));
-    server.setCookies('XSRF-TOKEN=stale');
+  it('asks for a token again and repeats once when the cookie went away during the call', async () => {
+    let first = true;
+    const server = fakeServer((_call, control) => {
+      if (first) {
+        // Logout in another tab: the cookie is cleared, so the header just sent no longer matches.
+        first = false;
+        control.clearCookie();
+        return problem(403, 'CSRF_INVALID');
+      }
+      return json(200, {});
+    });
+    server.setToken('old');
 
     const { response } = await server.client.POST('/api/auth/login', { body: login });
 
     expect(response.status).toBe(200);
     expect(server.calls.map((c) => [c.path, c.csrf])).toEqual([
-      ['/api/auth/login', 'stale'],
+      ['/api/auth/login', 'old'],
       ['/api/auth/csrf', null],
       ['/api/auth/login', 'token-2'],
     ]);
   });
 
+  it('reports a failed token request as the server error, not as CSRF_INVALID', async () => {
+    const client = createApiClient({
+      baseUrl: BASE,
+      fetch: async () => new Response('<html>Bad Gateway</html>', { status: 502 }),
+      readCookies: () => '',
+    });
+
+    const error = await client.POST('/api/auth/login', { body: login }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 502, code: 'HTTP_502' });
+  });
+
   it('does not repeat a real denial (403 FORBIDDEN)', async () => {
     const server = fakeServer(() => problem(403, 'FORBIDDEN'));
-    server.setCookies('XSRF-TOKEN=t');
+    server.setToken('t');
 
     const error = await unwrap(server.client.POST('/api/auth/login', { body: login })).catch((e: unknown) => e);
 
@@ -98,7 +133,7 @@ describe('createApiClient', () => {
 
   it('repeats a CSRF rejection only once', async () => {
     const server = fakeServer(() => problem(403, 'CSRF_INVALID'));
-    server.setCookies('XSRF-TOKEN=t');
+    server.setToken('t');
 
     const error = await unwrap(server.client.POST('/api/auth/login', { body: login })).catch((e: unknown) => e);
 
@@ -125,7 +160,7 @@ describe('unwrap', () => {
         current: { id: 'r1', version: 3 },
       }),
     );
-    server.setCookies('XSRF-TOKEN=t');
+    server.setToken('t');
 
     const error = await unwrap(server.client.POST('/api/auth/login', { body: login })).catch((e: unknown) => e);
 
@@ -148,5 +183,9 @@ describe('readCookie', () => {
   it('finds a cookie among others and decodes it', () => {
     expect(readCookie('a=1; XSRF-TOKEN=x%2By=; b=2', 'XSRF-TOKEN')).toBe('x+y=');
     expect(readCookie('a=1', 'XSRF-TOKEN')).toBeUndefined();
+  });
+
+  it('returns a malformed percent-encoded value as is instead of throwing', () => {
+    expect(readCookie('XSRF-TOKEN=abc%ZZ', 'XSRF-TOKEN')).toBe('abc%ZZ');
   });
 });

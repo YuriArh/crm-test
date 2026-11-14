@@ -20,9 +20,13 @@ export type ApiClientOptions = {
 /**
  * The single transport of the app. Every mutating call gets the CSRF header with the current value of
  * the `XSRF-TOKEN` cookie (read right before the call: the server rotates it on login and clears it
- * on logout). On `403 CSRF_INVALID` it fetches a fresh token and repeats the call once; `403 FORBIDDEN`
- * is a real denial and is not repeated. The repeat is safe: creates carry an Idempotency-Key and
- * patches a version. A broken connection becomes {@link NetworkError}.
+ * on logout). If there is no cookie, the token is fetched first.
+ *
+ * dispatch compares the header with the cookie, so a header read from the cookie passes. `403
+ * CSRF_INVALID` therefore means the cookie went away while the call was in flight (logout in another
+ * tab): the client asks for a token again and repeats the call once. `403 FORBIDDEN` is a real denial
+ * and is not repeated. The repeat is safe: creates carry an Idempotency-Key and patches a version.
+ * A broken connection becomes {@link NetworkError}; a failed token request becomes {@link ApiError}.
  */
 export function createApiClient(options: ApiClientOptions): ApiClient {
   const baseFetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
@@ -36,8 +40,13 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     }
   }
 
+  // A failure here (e.g. 502 while dispatch restarts) is reported as is, not as the CSRF_INVALID
+  // the call would get without a token.
   async function refreshCsrf(): Promise<void> {
-    await send(new Request(new URL(CSRF_PATH, options.baseUrl), { credentials: 'same-origin' }));
+    const response = await send(new Request(new URL(CSRF_PATH, options.baseUrl), { credentials: 'same-origin' }));
+    if (!response.ok) {
+      throw ApiError.from(response.status, await response.json().catch(() => undefined));
+    }
   }
 
   async function sendMutating(request: Request): Promise<Response> {
@@ -88,7 +97,13 @@ export function readCookie(cookies: string, name: string): string | undefined {
   for (const part of cookies.split(';')) {
     const [key, ...rest] = part.trim().split('=');
     if (key === name) {
-      return decodeURIComponent(rest.join('='));
+      const value = rest.join('=');
+      try {
+        return decodeURIComponent(value);
+      } catch {
+        // Malformed percent-encoding: send the raw value and let the server judge it.
+        return value;
+      }
     }
   }
   return undefined;

@@ -65,6 +65,7 @@ contracts-lint: ## Lint the OpenAPI contracts in contracts/ (Redocly CLI in Dock
 	docker run --rm -v "$(CURDIR)/contracts:/spec" -w /spec $(REDOCLY_IMAGE) lint carrier-api.yaml dispatch-api.yaml
 
 web-install: ## Install web/ dependencies (pnpm via corepack) and the Playwright browser
+	corepack enable
 	cd web && pnpm install --frozen-lockfile && pnpm e2e:install
 
 web-dev: ## Run the web client on :5173 (proxies /api to dispatch on :8080: make run or make up)

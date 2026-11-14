@@ -18,7 +18,7 @@ docs/              plan and documentation
 
 - Docker with Docker Compose
 - JDK 25 — only to build and run `dispatch` outside Docker
-- Node.js 22 with corepack (pnpm) — only to develop `web/` outside Docker
+- Node.js 22.12+ with corepack (pnpm; `make web-install` enables it) — only to develop `web/` outside Docker
 
 ## Run
 
