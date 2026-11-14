@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { RequestPage } from '@/shared/api';
 import { demoInitiator, problem, server } from '@/test/server';
 import { renderApp } from '@/test/renderApp';
-import { demoOperator, listItem, listPage, systemInfoHandler } from './fixtures';
+import { demoOperator, findRow, listItem, listPage, systemInfoHandler } from './fixtures';
 
 /** Serves `answer` for the list and records the query string of every call. */
 function serveList(answer: RequestPage | ((query: URLSearchParams) => RequestPage | Response)) {
@@ -43,7 +43,7 @@ describe('RequestListPage', () => {
     );
     renderApp('/requests', { me: demoInitiator });
 
-    const first = (await screen.findByText('DR-000128')).closest('tr')!;
+    const first = await findRow('DR-000128');
     expect(within(first).getByText('Паллеты с плиткой')).toBeInTheDocument();
     expect(within(first).getByText('01.12.2026')).toBeInTheDocument();
     expect(within(first).getByText('В работе')).toBeInTheDocument();
@@ -51,13 +51,33 @@ describe('RequestListPage', () => {
     expect(within(first).getByText('Оператор (Север)')).toBeInTheDocument();
     expect(within(first).getByText('12.11, 12:15')).toBeInTheDocument();
 
-    const overdue = screen.getByText('DR-000127').closest('tr')!;
+    const overdue = await findRow('DR-000127');
     expect(within(overdue).getByText('12.11.2026')).toBeInTheDocument();
     expect(within(overdue).getByText(/просрочена/)).toBeInTheDocument();
     expect(within(overdue).getByText('—')).toBeInTheDocument();
 
     expect(screen.getByTestId('request-total')).toHaveTextContent('2');
     expect(screen.getByText('1–2 из 2')).toBeInTheDocument();
+  });
+
+  it('has phone cards: number, result, cargo, deadline, and the delivery only when it is not the usual one', async () => {
+    const retrying = listItem({ number: 'DR-000150', deliveryStatus: 'RETRY_WAIT', overdue: true, deadline: '2026-11-12' });
+    const usual = listItem({ number: 'DR-000151', cargoDescription: 'Документы', deliveryStatus: 'ACKNOWLEDGED' });
+    serveList(listPage([retrying, usual]));
+    renderApp('/requests', { me: demoOperator });
+    await findRow('DR-000150');
+
+    // jsdom is as wide as a desktop, so the cards are hidden by CSS: query them with `hidden: true`.
+    const cards = within(screen.getByTestId('request-cards'));
+    const first = cards.getByRole('link', { name: /DR-000150/, hidden: true });
+    expect(first).toHaveAttribute('href', `/requests/${retrying.id}`);
+    expect(first).toHaveTextContent('до 12.11');
+    expect(first).toHaveTextContent('просрочена');
+    expect(first).toHaveTextContent('Повтор отправки');
+    expect(first).toHaveTextContent('Инициатор (Север)');
+    const second = cards.getByRole('link', { name: /DR-000151/, hidden: true });
+    expect(second).toHaveTextContent('Документы');
+    expect(second).not.toHaveTextContent('Получена перевозчиком');
   });
 
   it('asks for the first page of 20, newest first', async () => {
@@ -72,7 +92,7 @@ describe('RequestListPage', () => {
     serveList(listPage([listItem({ number: 'DR-000201', deliveryStatus: 'RETRY_WAIT' })]));
     renderApp('/requests', { me: demoInitiator });
 
-    const row = (await screen.findByText('DR-000201')).closest('tr')!;
+    const row = await findRow('DR-000201');
     expect(within(row).getByText('Отправляется')).toBeInTheDocument();
     expect(within(table()).queryByRole('columnheader', { name: 'Автор' })).not.toBeInTheDocument();
     expect(within(table()).getByRole('columnheader', { name: 'Создана' })).toBeInTheDocument();
@@ -90,7 +110,7 @@ describe('RequestListPage', () => {
     );
     renderApp('/requests', { me: demoOperator });
 
-    const row = (await screen.findByText('DR-000301')).closest('tr')!;
+    const row = await findRow('DR-000301');
     expect(within(row).getByText('Повтор отправки')).toBeInTheDocument();
     expect(within(row).getByText('Инициатор (Юг)')).toBeInTheDocument();
     expect(within(table()).getByRole('columnheader', { name: 'Автор' })).toBeInTheDocument();
@@ -133,7 +153,7 @@ describe('RequestListPage', () => {
     fail = false;
     await userEvent.click(screen.getByRole('button', { name: 'Повторить' }));
 
-    expect(await screen.findByText('DR-000401')).toBeInTheDocument();
+    expect(await findRow('DR-000401')).toBeInTheDocument();
   });
 
   it('goes to page 2: the page is in the address and in the query', async () => {
@@ -142,11 +162,11 @@ describe('RequestListPage', () => {
       return listPage([listItem({ number: page === 0 ? 'DR-000501' : 'DR-000502' })], { page, totalElements: 30 });
     });
     const { history } = renderApp('/requests', { me: demoInitiator });
-    await screen.findByText('DR-000501');
+    await findRow('DR-000501');
 
     await userEvent.click(screen.getByRole('button', { name: 'Страница 2' }));
 
-    expect(await screen.findByText('DR-000502')).toBeInTheDocument();
+    expect(await findRow('DR-000502')).toBeInTheDocument();
     expect(history.location.search).toBe('?page=2');
     expect(calls.at(-1)?.get('page')).toBe('1');
     expect(screen.getByText('21–30 из 30')).toBeInTheDocument();
@@ -159,7 +179,7 @@ describe('RequestListPage', () => {
     });
     const { history } = renderApp('/requests?page=7', { me: demoInitiator });
 
-    expect(await screen.findByText('DR-000602')).toBeInTheDocument();
+    expect(await findRow('DR-000602')).toBeInTheDocument();
     expect(history.location.search).toBe('?page=2');
   });
 
@@ -179,7 +199,7 @@ describe('RequestListPage', () => {
     serveList((query) => (query.get('businessStatus') ? problem(400, 'VALIDATION_FAILED') : listPage([listItem({ number: 'DR-000801' })])));
     const { history } = renderApp('/requests?result=REJECTED', { me: demoInitiator });
 
-    expect(await screen.findByText('DR-000801')).toBeInTheDocument();
+    expect(await findRow('DR-000801')).toBeInTheDocument();
     expect(history.location.search).toBe('');
   });
 
@@ -187,7 +207,7 @@ describe('RequestListPage', () => {
     const calls = serveList(listPage([listItem({ number: 'DR-000901' })]));
     const { history } = renderApp('/requests?result=foo&delivery=FAILED&page=abc&sort=old', { me: demoInitiator });
 
-    await screen.findByText('DR-000901');
+    await findRow('DR-000901');
     expect(Object.fromEntries(calls[0]!)).toEqual({ page: '0', size: '20', sort: 'createdAt,asc' });
     await waitFor(() => expect(history.location.search).toBe('?sort=old'));
   });

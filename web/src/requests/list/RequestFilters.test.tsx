@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import type { RequestPage } from '@/shared/api';
 import { demoInitiator, server } from '@/test/server';
 import { renderApp } from '@/test/renderApp';
-import { demoOperator, listItem, listPage, systemInfoHandler } from './fixtures';
+import { demoOperator, findRow, listItem, listPage, systemInfoHandler } from './fixtures';
 
 // Mantine's combobox scrolls the selected option into view; jsdom has no layout.
 Element.prototype.scrollIntoView ??= () => {};
@@ -24,10 +24,16 @@ function serveList(answer: (query: URLSearchParams) => RequestPage = () => listP
   return calls;
 }
 
-async function choose(field: string, option: string) {
-  await userEvent.click(await screen.findByRole('combobox', { name: field }));
+/** The desktop filter bar; jsdom renders the phone toolbar too (a browser hides it with CSS). */
+const bar = () => within(screen.getByTestId('filter-bar'));
+
+async function choose(field: string, option: string, scope = bar) {
+  await screen.findByRole('table');
+  const input = scope().getByRole('combobox', { name: field });
+  await userEvent.click(input);
+  const listbox = document.getElementById(input.getAttribute('aria-controls') ?? '')!;
   // The dropdown is still in its opening transition, which jsdom never finishes: count it as visible.
-  await userEvent.click(await screen.findByRole('option', { name: option, hidden: true }));
+  await userEvent.click(within(listbox).getByRole('option', { name: option, hidden: true }));
 }
 
 describe('RequestFilterBar', () => {
@@ -59,8 +65,8 @@ describe('RequestFilterBar', () => {
     renderApp('/requests', { me: demoInitiator });
     await screen.findByRole('table');
 
-    expect(screen.getByRole('combobox', { name: 'Результат' })).toBeInTheDocument();
-    expect(screen.queryByRole('combobox', { name: 'Доставка' })).not.toBeInTheDocument();
+    expect(bar().getByRole('combobox', { name: 'Результат' })).toBeInTheDocument();
+    expect(bar().queryByRole('combobox', { name: 'Доставка' })).not.toBeInTheDocument();
   });
 
   it('"Только просроченные" asks for overdue requests only', async () => {
@@ -68,7 +74,7 @@ describe('RequestFilterBar', () => {
     const { history } = renderApp('/requests', { me: demoInitiator });
     await screen.findByRole('table');
 
-    await userEvent.click(screen.getByRole('switch', { name: 'Только просроченные' }));
+    await userEvent.click(bar().getByRole('switch', { name: 'Только просроченные' }));
 
     await waitFor(() => expect(history.location.search).toBe('?overdue=1'));
     await waitFor(() => expect(calls.at(-1)?.get('overdue')).toBe('true'));
@@ -89,13 +95,13 @@ describe('RequestFilterBar', () => {
     serveList();
     const { history } = renderApp('/requests?result=SUCCEEDED&overdue=1&sort=number', { me: demoOperator });
     await screen.findByRole('table');
-    expect(screen.getByRole('combobox', { name: 'Результат' })).toHaveValue('Выполнена');
-    expect(screen.getByRole('switch', { name: 'Только просроченные' })).toBeChecked();
+    expect(bar().getByRole('combobox', { name: 'Результат' })).toHaveValue('Выполнена');
+    expect(bar().getByRole('switch', { name: 'Только просроченные' })).toBeChecked();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Сбросить' }));
+    await userEvent.click(bar().getByRole('button', { name: 'Сбросить' }));
 
     await waitFor(() => expect(history.location.search).toBe('?sort=number'));
-    expect(screen.queryByRole('button', { name: 'Сбросить' })).not.toBeInTheDocument();
+    expect(bar().queryByRole('button', { name: 'Сбросить' })).not.toBeInTheDocument();
   });
 
   it('says that nothing matches the filter and offers to reset it', async () => {
@@ -105,7 +111,7 @@ describe('RequestFilterBar', () => {
     expect(await screen.findByText('Ничего не найдено')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Сбросить фильтры' }));
 
-    expect(await screen.findByText('DR-001001')).toBeInTheDocument();
+    expect(await findRow('DR-001001')).toBeInTheDocument();
     expect(history.location.search).toBe('');
   });
 
@@ -118,7 +124,59 @@ describe('RequestFilterBar', () => {
 
     history.back();
 
-    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Результат' })).toHaveValue('Все'));
+    await waitFor(() => expect(bar().getByRole('combobox', { name: 'Результат' })).toHaveValue('Все'));
     expect(history.location.search).toBe('');
+  });
+});
+
+describe('RequestFilterToolbar (phone)', () => {
+  // jsdom is as wide as a desktop, so the phone toolbar is hidden by CSS: query it with `hidden: true`.
+  const toolbar = () => within(screen.getByTestId('filter-toolbar'));
+  // The drawer is still in its opening transition, which jsdom never finishes: count it as visible.
+  const drawer = async () => within(await screen.findByRole('dialog', { name: 'Фильтры', hidden: true }));
+
+  it('shows the active filters as chips; a chip removes its filter with one tap', async () => {
+    serveList();
+    const { history } = renderApp('/requests?result=REJECTED&overdue=1', { me: demoInitiator });
+    await screen.findByRole('table');
+    expect(toolbar().getByRole('button', { name: 'Фильтры · 2', hidden: true })).toBeInTheDocument();
+
+    await userEvent.click(toolbar().getByRole('button', { name: 'Снять фильтр «Отказ»', hidden: true }));
+
+    await waitFor(() => expect(history.location.search).toBe('?overdue=1'));
+    expect(toolbar().getByRole('button', { name: 'Фильтры · 1', hidden: true })).toBeInTheDocument();
+    expect(toolbar().getByRole('button', { name: 'Снять фильтр «Просроченные»', hidden: true })).toBeInTheDocument();
+  });
+
+  it('the drawer changes nothing until "Показать", then applies every field at once', async () => {
+    const calls = serveList();
+    const { history } = renderApp('/requests?page=2', { me: demoOperator });
+    await screen.findByRole('table');
+
+    await userEvent.click(toolbar().getByRole('button', { name: 'Фильтры', hidden: true }));
+    const sheet = await drawer();
+    const delivery = sheet.getByRole('combobox', { name: 'Доставка', hidden: true });
+    await userEvent.click(delivery);
+    const listbox = document.getElementById(delivery.getAttribute('aria-controls') ?? '')!;
+    await userEvent.click(within(listbox).getByRole('option', { name: 'Ошибка отправки', hidden: true }));
+    await userEvent.click(sheet.getByRole('switch', { name: 'Только просроченные', hidden: true }));
+    expect(history.location.search).toBe('?page=2');
+
+    await userEvent.click(sheet.getByRole('button', { name: 'Показать', hidden: true }));
+
+    await waitFor(() => expect(history.location.search).toBe('?delivery=FAILED&overdue=1'));
+    await waitFor(() => expect(calls.at(-1)?.get('deliveryStatus')).toBe('FAILED'));
+    expect(calls.at(-1)?.get('overdue')).toBe('true');
+  });
+
+  it('"Сбросить" in the drawer clears every filter', async () => {
+    serveList();
+    const { history } = renderApp('/requests?result=SUCCEEDED&overdue=1&sort=old', { me: demoInitiator });
+    await screen.findByRole('table');
+
+    await userEvent.click(toolbar().getByRole('button', { name: 'Фильтры · 2', hidden: true }));
+    await userEvent.click((await drawer()).getByRole('button', { name: 'Сбросить', hidden: true }));
+
+    await waitFor(() => expect(history.location.search).toBe('?sort=old'));
   });
 });

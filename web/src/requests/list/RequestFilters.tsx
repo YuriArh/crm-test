@@ -1,5 +1,6 @@
-import { Button, Group, Select, Switch, Text } from '@mantine/core';
-import { IconX } from '@tabler/icons-react';
+import { Button, Drawer, Group, Select, Stack, Switch, Text } from '@mantine/core';
+import { IconAdjustmentsHorizontal, IconX } from '@tabler/icons-react';
+import { useState } from 'react';
 import type { BusinessStatus, DeliveryStatus, Role } from '@/shared/api';
 import { BUSINESS_VIEWS, OPERATOR_DELIVERY_VIEWS } from '../statuses';
 import classes from './RequestList.module.css';
@@ -59,6 +60,7 @@ export function FilterFields({ filters, role, onChange, layout }: FieldsProps) {
           onChange({ result: value && value !== ALL ? (value as BusinessStatus) : undefined })
         }
         allowDeselect={false}
+        size={inline ? 'sm' : 'lg'}
         w={inline ? '15rem' : undefined}
         classNames={{ input: filters.result ? classes.activeFilter : undefined }}
         comboboxProps={{ width: 'max-content', position: 'bottom-start' }}
@@ -72,6 +74,7 @@ export function FilterFields({ filters, role, onChange, layout }: FieldsProps) {
             onChange({ delivery: value && value !== ALL ? (value as DeliveryStatus) : undefined })
           }
           allowDeselect={false}
+          size={inline ? 'sm' : 'lg'}
           w={inline ? '17rem' : undefined}
           classNames={{ input: filters.delivery ? classes.activeFilter : undefined }}
           comboboxProps={{ width: 'max-content', position: 'bottom-start' }}
@@ -96,9 +99,106 @@ export function SortSelect({ value, onChange, compact = false }: { value: ListSo
       value={value}
       onChange={(next) => next && onChange(next as ListSort)}
       allowDeselect={false}
+      size={compact ? 'lg' : 'sm'}
       w={compact ? '10.5rem' : '11.5rem'}
       comboboxProps={{ position: 'bottom-end', width: 'max-content' }}
     />
+  );
+}
+
+/** The labels of the active filters, for the phone chips. */
+function activeChips(filters: ListFilters, role: Role): { key: keyof ListFilters; label: string }[] {
+  const chips: { key: keyof ListFilters; label: string }[] = [];
+  if (filters.result) chips.push({ key: 'result', label: BUSINESS_VIEWS[filters.result].label });
+  if (filters.delivery && role === 'OPERATOR') {
+    chips.push({ key: 'delivery', label: OPERATOR_DELIVERY_VIEWS[filters.delivery].label });
+  }
+  if (filters.overdue) chips.push({ key: 'overdue', label: 'Просроченные' });
+  return chips;
+}
+
+/**
+ * The phone toolbar: "Фильтры · N" opens a bottom drawer with the same fields (applied with "Показать"),
+ * the sort beside it, and the active filters as chips that remove a filter with one tap.
+ */
+export function RequestFilterToolbar({ search, role, activeCount, onFilters, onReset, onSort }: BarProps) {
+  const [opened, setOpened] = useState(false);
+  const [draft, setDraft] = useState<ListFilters>({});
+  const open = () => {
+    setDraft({ result: search.result, delivery: search.delivery, overdue: search.overdue });
+    setOpened(true);
+  };
+  const chips = activeChips(search, role);
+
+  return (
+    <Stack gap="sm">
+      <Group gap="sm" wrap="nowrap">
+        <Button
+          variant={activeCount > 0 ? 'light' : 'default'}
+          size="lg"
+          leftSection={<IconAdjustmentsHorizontal size="1.1em" />}
+          onClick={open}
+          flex={1}
+        >
+          {activeCount > 0 ? `Фильтры · ${activeCount}` : 'Фильтры'}
+        </Button>
+        <SortSelect value={search.sort ?? 'new'} onChange={onSort} compact />
+      </Group>
+      {chips.length > 0 && (
+        <Group gap="xs">
+          {chips.map((chip) => (
+            <Button
+              key={chip.key}
+              variant="light"
+              size="lg"
+              radius="xl"
+              rightSection={<IconX size="1em" />}
+              aria-label={`Снять фильтр «${chip.label}»`}
+              onClick={() => onFilters({ [chip.key]: undefined })}
+            >
+              {chip.label}
+            </Button>
+          ))}
+        </Group>
+      )}
+      <Drawer
+        opened={opened}
+        onClose={() => setOpened(false)}
+        position="bottom"
+        title="Фильтры"
+        classNames={{ content: classes.sheet, title: classes.sheetTitle }}
+      >
+        <Stack gap="lg" pb="md">
+          <FilterFields
+            filters={draft}
+            role={role}
+            onChange={(change) => setDraft((current) => ({ ...current, ...change }))}
+            layout="stacked"
+          />
+          <Group grow gap="sm">
+            <Button
+              variant="default"
+              size="lg"
+              onClick={() => {
+                onReset();
+                setOpened(false);
+              }}
+            >
+              Сбросить
+            </Button>
+            <Button
+              size="lg"
+              onClick={() => {
+                onFilters(draft);
+                setOpened(false);
+              }}
+            >
+              Показать
+            </Button>
+          </Group>
+        </Stack>
+      </Drawer>
+    </Stack>
   );
 }
 

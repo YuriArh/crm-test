@@ -1,4 +1,5 @@
 // Test data of the requests list for component tests (MSW handlers and rows); not used by the app.
+import { screen } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import type { Me, RequestListItem, RequestPage } from '@/shared/api';
 import { demoInitiator } from '@/test/server';
@@ -45,4 +46,12 @@ export const systemInfoHandler = http.get('*/api/system/info', () =>
 /** The list answering `page` for any query, and system info: enough to render the registry. */
 export function listHandlers(page: RequestPage = listPage([])) {
   return [http.get('*/api/requests', () => HttpResponse.json(page)), systemInfoHandler];
+}
+
+/**
+ * The table row of a request. jsdom renders the phone cards as well (a browser hides them with CSS), so
+ * rows are found by the number link of the table, whose name is the number alone.
+ */
+export async function findRow(number: string): Promise<HTMLElement> {
+  return (await screen.findByRole('link', { name: number })).closest('tr')!;
 }

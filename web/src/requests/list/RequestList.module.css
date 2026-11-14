@@ -92,6 +92,13 @@
   font-family: var(--mantine-font-family-monospace);
 }
 
+/* The phone pager "2 / 7" keeps its width while the digits change. */
+.pageCounter {
+  font-variant-numeric: tabular-nums;
+  min-width: 4em;
+  text-align: center;
+}
+
 /* An active filter shows that the list is narrowed. */
 .activeFilter {
   border-color: var(--mantine-color-accent-6);
@@ -104,4 +111,19 @@
   &[data-active] {
     visibility: visible;
   }
+}
+
+/* The phone filter drawer is a bottom sheet as tall as its fields. */
+.sheet {
+  flex: 1 1 auto;
+  align-self: flex-end;
+  height: auto;
+  max-height: 85dvh;
+  border-top-left-radius: var(--mantine-radius-xl);
+  border-top-right-radius: var(--mantine-radius-xl);
+}
+
+.sheetTitle {
+  font-size: var(--mantine-font-size-xl);
+  font-weight: 590;
 }
