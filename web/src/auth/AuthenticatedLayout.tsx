@@ -32,15 +32,18 @@ export function AuthenticatedLayout() {
             </Text>
           </Group>
           <Group gap="sm" wrap="nowrap">
-            <Stack gap={0} align="flex-end">
-              <Text size="sm" fw={510} lineClamp={1}>
-                {me.displayName}
-              </Text>
-              <Text size="xs" c="dimmed" lineClamp={1}>
-                {ROLE_LABELS[me.role]} · {me.service.name}
-              </Text>
-            </Stack>
-            <Divider orientation="vertical" my="sm" />
+            {/* Below 36em (phones) the header keeps only the mark, the scheme switch and "Выйти". */}
+            <Group gap="sm" wrap="nowrap" visibleFrom="xs" data-testid="header-user">
+              <Stack gap={0} align="flex-end">
+                <Text size="sm" fw={510} lineClamp={1}>
+                  {me.displayName}
+                </Text>
+                <Text size="xs" c="dimmed" lineClamp={1}>
+                  {ROLE_LABELS[me.role]} · {me.service.name}
+                </Text>
+              </Stack>
+              <Divider orientation="vertical" my="sm" />
+            </Group>
             <ColorSchemeToggle />
             <Button variant="default" size="xs" onClick={signOut} loading={logout.isPending}>
               Выйти

@@ -1,0 +1,129 @@
+/* What the requests list cannot express with Mantine props: row links, truncation, row height. */
+
+.table {
+  --table-border-color: var(--app-color-border);
+}
+
+.table thead th {
+  color: var(--app-color-text-tertiary);
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 510;
+  white-space: nowrap;
+  background-color: var(--mantine-color-body);
+}
+
+/* The whole row is a link: the link in the number cell stretches over the row (keyboard, Ctrl+click,
+   "open in a new tab" all work), the other cells stay readable. */
+.row {
+  position: relative;
+  height: calc(2.5rem * var(--mantine-scale));
+}
+
+.row td {
+  white-space: nowrap;
+}
+
+.rowLink {
+  font-family: var(--mantine-font-family-monospace);
+  font-size: var(--mantine-font-size-sm);
+  color: var(--mantine-color-text);
+  text-decoration: none;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+
+  &:focus-visible {
+    outline: none;
+  }
+
+  &:focus-visible::after {
+    outline: 2px solid var(--mantine-color-accent-6);
+    outline-offset: -2px;
+    border-radius: var(--mantine-radius-sm);
+  }
+}
+
+/* A status badge is never cut: the word is the status. */
+.badgeCell > * {
+  min-width: max-content;
+}
+
+/* The cargo takes the remaining width and is cut with an ellipsis; it sits above the row link so its
+   tooltip works, and is itself a link to the same card. */
+.cargoCell {
+  width: 100%;
+  max-width: 0;
+}
+
+.cargoLink {
+  position: relative;
+  z-index: 1;
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A phone card is one link. */
+.card {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  background-color: var(--app-color-surface);
+  border: 1px solid var(--app-color-border);
+  border-radius: var(--mantine-radius-lg);
+  padding: var(--mantine-spacing-md);
+
+  &:hover {
+    background-color: var(--mantine-color-default-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--mantine-color-accent-6);
+    outline-offset: 1px;
+  }
+}
+
+.number {
+  font-family: var(--mantine-font-family-monospace);
+}
+
+/* The phone pager "2 / 7" keeps its width while the digits change. */
+.pageCounter {
+  font-variant-numeric: tabular-nums;
+  min-width: 4em;
+  text-align: center;
+}
+
+/* An active filter shows that the list is narrowed. */
+.activeFilter {
+  border-color: var(--mantine-color-accent-6);
+}
+
+/* Keeps its height while hidden, so the loading bar does not shift the rows. */
+.loadingBar {
+  visibility: hidden;
+
+  &[data-active] {
+    visibility: visible;
+  }
+}
+
+/* The phone filter drawer is a bottom sheet as tall as its fields. */
+.sheet {
+  flex: 1 1 auto;
+  align-self: flex-end;
+  height: auto;
+  max-height: 85dvh;
+  border-top-left-radius: var(--mantine-radius-xl);
+  border-top-right-radius: var(--mantine-radius-xl);
+}
+
+.sheetTitle {
+  font-size: var(--mantine-font-size-xl);
+  font-weight: 590;
+}
