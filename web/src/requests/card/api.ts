@@ -31,6 +31,13 @@ export function requestCardQueryOptions(id: string) {
   });
 }
 
+/** Enabled operators of the caller's service, the choices of an assignee. Asked by operators only. */
+export const operatorsQueryOptions = queryOptions({
+  queryKey: requestKeys.operators,
+  queryFn: () => unwrap(api.GET('/api/users/operators')),
+  staleTime: 60_000,
+});
+
 /** The request is gone from the caller's scope: someone else's, or no longer visible (NF02). */
 export function isCardGone(error: unknown): boolean {
   return isApiError(error) && error.status === 404;

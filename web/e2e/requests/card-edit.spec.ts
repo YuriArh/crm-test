@@ -39,3 +39,22 @@ test('an emptied comment is removed', async ({ page }) => {
   await expect(field).toHaveValue('');
   await expect(field).toHaveAttribute('placeholder', 'Нет комментария');
 });
+
+test('an operator assigns himself and the initiator sees it on the card', async ({ page }) => {
+  const request = await createRequestViaApi(page, 'north.initiator');
+
+  await signInViaApi(page, 'north.operator');
+  await page.goto(`/requests/${request.id}`);
+  const assignee = page.getByRole('combobox', { name: 'Ответственный' });
+  await expect(assignee).toHaveValue('Не назначен');
+  await assignee.click();
+  await page.getByRole('option', { name: 'Оператор (Север)' }).click();
+  await page.getByRole('button', { name: 'Сохранить' }).click();
+  await expect(page.getByText('Сохранено')).toBeVisible();
+
+  await signInViaApi(page, 'north.initiator');
+  await page.goto(`/requests/${request.id}`);
+  const properties = page.getByRole('region', { name: 'Свойства' });
+  await expect(properties.getByText('Оператор (Север)')).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Ответственный' })).toHaveCount(0);
+});
