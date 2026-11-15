@@ -8,9 +8,15 @@ A test assignment: "Exchange with an external system". The spec is `04-system-in
 
 Domain: a cargo delivery request (cargo, weight, address, deadline). Lifecycle: "Create" (saved and queued for sending in one transaction; no drafts, content is immutable) → execution → result. A fictional delivery carrier (`carrier-emulator`) returns a shipment number and price, or a rejection. `dispatch` **pulls** results from the emulator by polling.
 
+## Working rules
+
+- **Spec → plan → code.** A new piece of work starts with a spec (`docs/specs/`). Once the spec is agreed, write a separate implementation plan (`docs/plans/`) and stop. Write no code until the user explicitly says to implement. Agreeing to a spec ("давай сделаем") means "finish the spec", not "start coding".
+- **Fix the cause, not the symptom.** Solve a problem systemically: find its root cause and fix that. Do not propose or pile up workarounds, and do not route around the problem. Before offering a fix, check how the industry solves this class of problem and prefer the established pattern. If a proposed fix only patches over a flaw in the design, say so and fix the design instead.
+- **No giant bash edits.** Create files with Write and change them with Edit, one file per call, so every change can be reviewed in the approval prompt. Several Write/Edit calls may go in one message. Never bundle edits to many files into one Bash command (heredocs, inline python/sed rewriting several files). Bash is for running things: build, tests, docker, curl.
+
 ## Repository layout and status
 
-- `dispatch/` — the main application: accepts delivery requests, dispatches them to the carrier, tracks delivery and result, reconciles. Spring Boot 4 / Java 25 (package `com.acme.dispatch`). Stage-1 schema (Flyway V1–V5, see `docs/dispatch-design.md` §4), session sign-in, the requests API (create with `Idempotency-Key`, registry, card, `PATCH` comment/assignee) and the exchange with the carrier (send worker with retries, feed polling, `ResultInbox`) are implemented; reconciliation, problems and operator actions are not yet. Packages under `com.acme.dispatch`:
+- `dispatch/` — the main application: accepts delivery requests, dispatches them to the carrier, tracks delivery and result, reconciles. Spring Boot 4 / Java 25 (package `com.acme.dispatch`). Stage-1 schema (Flyway V1–V6, see `docs/dispatch-design.md` §4), session sign-in, the requests API (create with `Idempotency-Key`, registry, card, `PATCH` comment/assignee) and the exchange with the carrier (send worker with retries, feed polling, `ResultInbox`) are implemented; reconciliation, problems and operator actions are not yet. Packages under `com.acme.dispatch`:
   - `auth` — users, services, `CurrentUser` principal, `SecurityConfig` (session cookie, SPA CSRF, 401/403 as Problem Details), login/logout/me, operators list;
   - `request` — `DeliveryRequest` aggregate, `RequestService` (write side), `RequestQueryService`/`RequestQueryDao` (registry and card SQL), `RequestPermissions` (pure access policy), `OverduePolicy`, request bodies;
   - `carrier` — `CarrierClient` / `HttpCarrierClient` (the only code that knows the carrier's HTTP API; own DTOs per `contracts/carrier-api.yaml`; classifies submit outcomes);
