@@ -42,7 +42,15 @@ class SchemaMigrationTests {
     @Test
     void allMigrationsAreApplied() {
         assertThat(Arrays.stream(flyway.info().applied()).map(MigrationInfo::getVersion).map(Object::toString))
-                .containsExactly("1", "2", "3", "4", "5");
+                .containsExactly("1", "2", "3", "4", "5", "6");
+    }
+
+    @Test
+    void openAttemptsHaveAPartialIndex() {
+        assertThat(jdbc.sql("SELECT indexdef FROM pg_indexes WHERE indexname = 'exchange_attempt_open_idx'")
+                .query(String.class).single())
+                .contains("(started_at)")
+                .contains("WHERE (finished_at IS NULL)");
     }
 
     @Test

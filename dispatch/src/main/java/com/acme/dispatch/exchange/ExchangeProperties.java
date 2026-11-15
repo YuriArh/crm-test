@@ -10,9 +10,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *
  * @param enabled          whether the send and feed workers run on their schedule (off in integration tests,
  *                         which call them directly)
- * @param sendBatchSize    operations claimed per send pass
+ * @param sendsPerPass     most operations sent in one pass; each is claimed right before it is sent
  * @param lease            how long a claimed operation stays in {@code SENDING}; after that it is treated as
- *                         interrupted and goes to {@code UNKNOWN}
+ *                         interrupted and goes to {@code UNKNOWN}; it is also the lifetime of an open send
+ *                         attempt, so it must exceed the carrier connect timeout plus the read timeout
  * @param initialBackoff   pause before the second attempt; doubles with every attempt
  * @param maxBackoff       upper bound of the pause
  * @param maxAttempts      attempts before the operation becomes {@code FAILED}
@@ -22,7 +23,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 @ConfigurationProperties(prefix = "app.exchange")
 public record ExchangeProperties(
         @DefaultValue("true") boolean enabled,
-        @DefaultValue("20") int sendBatchSize,
+        @DefaultValue("20") int sendsPerPass,
         @DefaultValue("60s") Duration lease,
         @DefaultValue("5s") Duration initialBackoff,
         @DefaultValue("5m") Duration maxBackoff,

@@ -3,6 +3,7 @@ package com.acme.dispatch.exchange;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.acme.dispatch.carrier.CarrierClient;
@@ -20,9 +21,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * Sends queued operations to the carrier ({@code docs/dispatch-design.md} §5, D04, D-NF01).
  * <ol>
- *   <li>recover operations whose sender died mid-send ({@code SENDING} past its lease → {@code UNKNOWN});</li>
- *   <li>claim due operations in a short transaction ({@code FOR UPDATE SKIP LOCKED}, safe with several
- *       instances) and open an attempt row;</li>
+ *   <li>recover operations whose sender died mid-send ({@code SENDING} past its lease → {@code UNKNOWN}) and close
+ *       attempts left open past the lease;</li>
+ *   <li>claim the next due operation right before sending it, in a short transaction ({@code FOR UPDATE SKIP
+ *       LOCKED}, safe with several instances), and open its attempt row — one at a time, so the lease always
+ *       measures the call in progress;</li>
  *   <li>call the carrier outside any transaction, with the operation's own immutable operationId;</li>
  *   <li>record the outcome with a conditional update fenced by the attempt number.</li>
  * </ol>
@@ -32,6 +35,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class SendWorker {
 
     private static final Logger log = LoggerFactory.getLogger(SendWorker.class);
+    /** Recovered operationIds written to one log line; after a long outage there may be many. */
+    private static final int LOGGED_IDS = 10;
 
     private final SendQueueDao queue;
     private final ExchangeAttemptDao attempts;
@@ -61,14 +66,22 @@ public class SendWorker {
         }
     }
 
-    /** One pass: recovery, one claimed batch sent and recorded. Returns how many operations were sent. */
+    /**
+     * One pass: recovery, then up to {@code sendsPerPass} operations, each claimed right before it is sent and
+     * recorded. Stops early when nothing is due. Returns how many operations were sent.
+     */
     public int runOnce() {
         recover();
-        List<SendQueueDao.Claimed> batch = claim();
-        for (SendQueueDao.Claimed claimed : batch) {
-            send(claimed);
+        int sent = 0;
+        while (sent < properties.sendsPerPass()) {
+            Optional<SendQueueDao.Claimed> claimed = claimNext();
+            if (claimed.isEmpty()) {
+                break;
+            }
+            send(claimed.get());
+            sent++;
         }
-        return batch.size();
+        return sent;
     }
 
     private void recover() {
@@ -76,26 +89,29 @@ public class SendWorker {
             Instant now = calendar.now();
             List<UUID> recovered = queue.recoverExpired(now);
             if (!recovered.isEmpty()) {
-                attempts.finishInterrupted(recovered, now);
-                log.warn("Recovered {} operation(s) left in SENDING after an interrupted send", recovered.size());
+                log.warn("Recovered {} operation(s) left in SENDING after an interrupted send: {}{}", recovered.size(),
+                        recovered.subList(0, Math.min(recovered.size(), LOGGED_IDS)),
+                        recovered.size() > LOGGED_IDS ? " …" : "");
+            }
+            int closed = attempts.finishExpired(now, now.minus(properties.lease()));
+            if (closed > 0) {
+                log.warn("Closed {} exchange attempt(s) left open past the lease", closed);
             }
         });
     }
 
-    private List<SendQueueDao.Claimed> claim() {
+    /** Claims one due operation and opens its attempt in one short transaction, right before the call. */
+    private Optional<SendQueueDao.Claimed> claimNext() {
         return transaction.execute(status -> {
             Instant now = calendar.now();
-            List<SendQueueDao.Claimed> claimed = queue.claimDue(now, now.plus(properties.lease()),
-                    properties.sendBatchSize());
-            for (SendQueueDao.Claimed operation : claimed) {
-                attempts.start(ids.newId(), operation.operationId(), operation.attempt(), now);
-            }
+            Optional<SendQueueDao.Claimed> claimed = queue.claimNext(now, now.plus(properties.lease()));
+            claimed.ifPresent(operation ->
+                    attempts.start(ids.newId(), operation.operationId(), operation.attempt(), operation.claimedAt()));
             return claimed;
         });
     }
 
     private void send(SendQueueDao.Claimed claimed) {
-        Instant started = calendar.now();
         SubmitResult result;
         try {
             result = carrier.submit(claimed.request());
@@ -104,12 +120,14 @@ public class SendWorker {
             result = new SubmitResult(SubmitOutcome.UNKNOWN, null, "Client error: " + e);
         }
         SubmitResult outcome = result;
-        transaction.executeWithoutResult(status -> record(claimed, outcome, started));
+        transaction.executeWithoutResult(status -> record(claimed, outcome));
     }
 
-    private void record(SendQueueDao.Claimed claimed, SubmitResult result, Instant started) {
+    private void record(SendQueueDao.Claimed claimed, SubmitResult result) {
         Instant now = calendar.now();
-        attempts.finish(claimed.operationId(), claimed.attempt(), result, now, Duration.between(started, now));
+        // Measured from the instant stored as started_at, so started_at + duration = finished_at.
+        attempts.finish(claimed.operationId(), claimed.attempt(), result, now,
+                Duration.between(claimed.claimedAt(), now));
         boolean updated = switch (result.outcome()) {
             case ACKNOWLEDGED -> queue.acknowledge(claimed, now);
             case TEMPORARY_ERROR -> retryOrFail(claimed, DeliveryStatus.RETRY_WAIT, result, now);
