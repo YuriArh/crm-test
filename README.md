@@ -1,84 +1,84 @@
-# Exchange with an external system
+# Обмен с внешней системой
 
-Test assignment: `04-system-integration.md`. Work plan: `docs/PLAN.md`.
+Тестовое задание: `04-system-integration.md`. План работ: `docs/PLAN.md`.
 
-## Structure
+## Структура
 
 ```
-dispatch/          main application: accepts delivery requests, dispatches them
-                   to the carrier, tracks delivery and result, reconciles
-carrier-emulator/  emulator of the external delivery carrier (own database `carrier`)
-contracts/         OpenAPI contracts (dispatch-api.yaml: web ↔ dispatch, carrier-api.yaml: dispatch ↔ carrier)
-docker/            PostgreSQL init script (creates the carrier database)
-web/               web client: React + TypeScript + Vite + Mantine, served by nginx in Docker
-docs/              plan and documentation
+dispatch/          основное приложение: принимает заявки на доставку, передаёт их
+                   перевозчику, отслеживает доставку и результат, сверяет
+carrier-emulator/  эмулятор внешнего перевозчика (своя база `carrier`)
+contracts/         OpenAPI-контракты (dispatch-api.yaml: веб ↔ dispatch, carrier-api.yaml: dispatch ↔ перевозчик)
+docker/            скрипт инициализации PostgreSQL (создаёт базу эмулятора)
+web/               веб-клиент: React + TypeScript + Vite + Mantine, в Docker раздаётся nginx
+docs/              план и документация
 ```
 
-## Requirements
+## Что нужно
 
-- Docker with Docker Compose
-- JDK 25 — only to build and run `dispatch` outside Docker
-- Node.js 22.12+ with corepack (pnpm; `make web-install` enables it) — only to develop `web/` outside Docker
+- Docker с Docker Compose
+- JDK 25 — только чтобы собирать и запускать `dispatch` вне Docker
+- Node.js 22.12+ с corepack (pnpm; его включает `make web-install`) — только для разработки `web/` вне Docker
 
-## Run
+## Запуск
 
 ```bash
 cp .env.example .env
-make up        # build and start postgres + dispatch + carrier-emulator + web
-make ps        # service status
+make up        # собрать и запустить postgres + dispatch + carrier-emulator + web
+make ps        # состояние сервисов
 ```
 
-Check: `curl http://localhost:8080/actuator/health`, `curl http://localhost:8080/api/system/info` and `curl http://localhost:8081/actuator/health` (emulator).
+Проверка: `curl http://localhost:8080/actuator/health`, `curl http://localhost:8080/api/system/info` и `curl http://localhost:8081/actuator/health` (эмулятор).
 
-The web client is at http://localhost:3000. It and the API share this origin: nginx serves the static build and proxies `/api` to `dispatch`.
+Веб-клиент открывается на http://localhost:3000. Он и API работают на одном origin: nginx раздаёт собранную статику и проксирует `/api` в `dispatch`.
 
-If port 5432, 8080, 8081 or 3000 is already taken, change `DB_PORT` / `DISPATCH_PORT` / `CARRIER_PORT` / `WEB_PORT` in `.env`. Both `docker compose` and `make run` read it.
+Если порт 5432, 8080, 8081 или 3000 занят, поменяйте `DB_PORT` / `DISPATCH_PORT` / `CARRIER_PORT` / `WEB_PORT` в `.env`. Его читают и `docker compose`, и `make run`.
 
-The emulator's database is created by `docker/postgres/init` only when the PostgreSQL volume is empty. If the stack was started before the emulator existed, run `make reset` once (it deletes local data).
+База эмулятора создаётся скриптом из `docker/postgres/init` только на пустом томе PostgreSQL. Если стенд запускался ещё до появления эмулятора, один раз выполните `make reset` (он удаляет локальные данные).
 
-## Demo users
+## Демо-пользователи
 
-Password for all users: `demo1234`.
+Пароль у всех: `demo1234`.
 
-| Login | Role | Service |
+| Логин | Роль | Служба |
 |---|---|---|
-| `north.initiator` | initiator | North |
-| `north.operator` | operator | North |
-| `south.initiator` | initiator | South |
+| `north.initiator` | инициатор | Север |
+| `north.operator` | оператор | Север |
+| `south.initiator` | инициатор | Юг |
 
-The operator sees only North requests; each initiator sees only their own.
+Оператор видит только заявки службы «Север», каждый инициатор — только свои.
 
 ## API
 
-| Method and path | Who | What |
+| Метод и путь | Кому | Что делает |
 |---|---|---|
-| `GET /api/auth/csrf` | anyone | sets the `XSRF-TOKEN` cookie and returns the token |
-| `POST /api/auth/login` | anyone | `{username, password}` → session cookie + current user |
-| `POST /api/auth/logout` | signed in | ends the session (204) |
-| `GET /api/auth/me` | signed in | current user and service |
-| `GET /api/users/operators` | operator | operators of the own service (assignee picker) |
-| `POST /api/requests` | initiator | create a request; header `Idempotency-Key` required; the request is queued for the carrier at once |
-| `GET /api/requests` | signed in | registry: `businessStatus`, `deliveryStatus`, `overdue`, `page`, `size` (≤ 100), `sort` (`createdAt` / `deadline` / `number`, `,asc` / `,desc`) |
-| `GET /api/requests/{id}` | signed in | request card; operators also get the `exchange` block |
-| `PATCH /api/requests/{id}` | owner / operator | `{version, comment?, assigneeId?}`; an omitted field is kept, `null` clears it; only an operator sets the assignee |
+| `GET /api/auth/csrf` | всем | ставит cookie `XSRF-TOKEN` и возвращает токен |
+| `POST /api/auth/login` | всем | `{username, password}` → cookie сессии + текущий пользователь |
+| `POST /api/auth/logout` | вошедшим | завершает сессию (204) |
+| `GET /api/auth/me` | вошедшим | текущий пользователь и служба |
+| `GET /api/users/operators` | оператору | операторы своей службы (выбор ответственного) |
+| `POST /api/requests` | инициатору | создать заявку; заголовок `Idempotency-Key` обязателен; заявка сразу ставится в очередь к перевозчику |
+| `GET /api/requests` | вошедшим | реестр: `businessStatus`, `deliveryStatus`, `overdue`, `page`, `size` (≤ 100), `sort` (`createdAt` / `deadline` / `number`, `,asc` / `,desc`) |
+| `GET /api/requests/{id}` | вошедшим | карточка заявки; оператор получает ещё блок `exchange` |
+| `PATCH /api/requests/{id}` | автору / оператору | `{version, comment?, assigneeId?}`; не переданное поле сохраняется, `null` очищает; ответственного назначает только оператор |
 
-- Every mutating request needs the `X-XSRF-TOKEN` header with the value of the `XSRF-TOKEN` cookie; the token changes after login, so re-read the cookie.
-- Errors are Problem Details (RFC 9457) with a machine-readable `code`: `VALIDATION_FAILED` (with `errors[]` per field), `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_REUSED`, `UNAUTHENTICATED`, `BAD_CREDENTIALS`, `FORBIDDEN`, `CSRF_INVALID` (missing or stale CSRF token; fetch a new one and repeat), `NOT_FOUND`, `VERSION_CONFLICT` (with the `current` state), `INVALID_ASSIGNEE`. Other HTTP errors carry the status name as the code, e.g. `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`.
-- A repeated create with the same `Idempotency-Key` returns the first response with header `Idempotent-Replayed: true`.
+- Каждый изменяющий запрос требует заголовок `X-XSRF-TOKEN` со значением cookie `XSRF-TOKEN`. После входа токен меняется, поэтому cookie нужно перечитать.
+- Ошибки — Problem Details (RFC 9457) с машиночитаемым `code`: `VALIDATION_FAILED` (с `errors[]` по полям), `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_REUSED`, `UNAUTHENTICATED`, `BAD_CREDENTIALS`, `FORBIDDEN`, `CSRF_INVALID` (CSRF-токена нет или он устарел: получите новый и повторите), `NOT_FOUND`, `VERSION_CONFLICT` (с текущим состоянием в `current`), `INVALID_ASSIGNEE`. У остальных HTTP-ошибок код — имя статуса, например `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`.
+- Повторное создание с тем же `Idempotency-Key` возвращает первый ответ с заголовком `Idempotent-Replayed: true`.
 
-### How a request reaches its result
+### Как заявка доходит до результата
 
-1. `POST /api/requests` saves the request and puts its operation into the send queue in one transaction: `deliveryStatus: PENDING`, `businessStatus: AWAITING`.
-2. The send worker (every ~1 s) sends it to the carrier with its immutable `operationId` → `ACKNOWLEDGED`. If the carrier is unreachable or answers `5xx` → `RETRY_WAIT`; no answer in time → `UNKNOWN`; both are retried with the same `operationId` (pause from 5 s, doubling up to 5 min, at most 8 attempts, then `FAILED`). `4xx` → `FAILED`.
-3. The feed poller (every ~1 s) reads the carrier's result feed and passes each entry to one handler: the card moves to `IN_PROGRESS`, then `SUCCEEDED` (tracking number, price) or `REJECTED` (reason). Duplicates and outdated results have no effect; a final result is never overwritten.
-4. A result also confirms delivery: a request stuck in `UNKNOWN` becomes `ACKNOWLEDGED` and is not resent.
+1. `POST /api/requests` в одной транзакции сохраняет заявку и ставит её операцию в очередь на отправку: `deliveryStatus: PENDING`, `businessStatus: AWAITING`.
+2. Воркер отправки (примерно раз в секунду) отправляет её перевозчику с неизменяемым `operationId` → `ACKNOWLEDGED`. Если перевозчик недоступен или отвечает `5xx` → `RETRY_WAIT`; ответа не дождались → `UNKNOWN`. В обоих случаях отправка повторяется с тем же `operationId` (пауза от 5 с, удваивается до 5 минут, не больше 8 попыток, затем `FAILED`). `4xx` → `FAILED`.
+3. Опрос ленты (примерно раз в секунду) читает ленту результатов перевозчика и передаёт каждую запись единому обработчику: карточка переходит в `IN_PROGRESS`, затем в `SUCCEEDED` (номер отправления, стоимость) или `REJECTED` (причина). Дубликаты и устаревшие результаты ни на что не влияют, итоговый результат никогда не перезаписывается.
+4. Результат заодно подтверждает доставку: заявка, застрявшая в `UNKNOWN`, становится `ACKNOWLEDGED` и повторно не отправляется.
 
-Operators see the exchange state in the card's `exchange` block: attempts, next attempt, last error, when and how delivery was confirmed. Each result changes the request's `version`, so read the card again before editing.
+Состояние обмена оператор видит в блоке `exchange` карточки: попытки, следующая попытка, последняя ошибка, когда и как подтверждена доставка. Каждый результат меняет `version` заявки, поэтому перед правкой перечитайте карточку.
 
-### Walkthrough with curl
+### Пример с curl
 
 ```bash
-JAR=$(mktemp)                       # cookie jar: session + CSRF cookie
+JAR=$(mktemp)                       # хранилище cookie: сессия + CSRF
 API=http://localhost:8080
 token() { awk '$6 == "XSRF-TOKEN" { print $7 }' "$JAR"; }
 
@@ -86,34 +86,34 @@ curl -s -c "$JAR" -b "$JAR" $API/api/auth/csrf > /dev/null
 curl -s -c "$JAR" -b "$JAR" -H "X-XSRF-TOKEN: $(token)" -H 'Content-Type: application/json' \
      -d '{"username":"north.initiator","password":"demo1234"}' $API/api/auth/login
 
-# Create (deadline must not be before today in Europe/Moscow)
+# Создать (срок не раньше сегодняшнего дня по Europe/Moscow)
 curl -s -c "$JAR" -b "$JAR" -H "X-XSRF-TOKEN: $(token)" -H 'Content-Type: application/json' \
      -H "Idempotency-Key: $(uuidgen)" \
      -d '{"cargoDescription":"Pallets","weightKg":12.5,"deliveryAddress":"Main st 1","deadline":"2026-12-01"}' \
      $API/api/requests
 
-curl -s -b "$JAR" "$API/api/requests?businessStatus=SUCCEEDED"   # a second or two later: executed by the carrier
+curl -s -b "$JAR" "$API/api/requests?businessStatus=SUCCEEDED"   # через секунду-две: перевозчик исполнил
 
-# Edit: use the id and the current version from the card
+# Правка: id и текущая версия берутся из карточки
 curl -s -c "$JAR" -b "$JAR" -X PATCH -H "X-XSRF-TOKEN: $(token)" -H 'Content-Type: application/json' \
      -d '{"version":<version>,"comment":"Fragile"}' $API/api/requests/<id>
 ```
 
-## Carrier emulator
+## Эмулятор перевозчика
 
-`carrier-emulator` (port 8081) stands in for the external delivery carrier. Contract and exchange rules: `contracts/carrier-api.yaml`; design: `docs/carrier-emulator-design.md`; fault modes: `docs/specs/carrier-faults.md`.
+`carrier-emulator` (порт 8081) изображает внешнего перевозчика. Контракт и правила обмена: `contracts/carrier-api.yaml`; устройство: `docs/carrier-emulator-design.md`; режимы сбоев: `docs/specs/carrier-faults.md`.
 
-| Method and path | What |
+| Метод и путь | Что делает |
 |---|---|
-| `POST /operations` | receive an operation; `202` also for a repeat with the same content (no second execution), `409 PAYLOAD_MISMATCH` for the same `operationId` with other content |
-| `GET /operations/{operationId}` | carrier's state and latest result (for reconciliation); `404` if unknown |
-| `GET /results?after=N&limit=100` | result feed after cursor `N`: `IN_PROGRESS`, then `SUCCEEDED` / `REJECTED` |
-| `GET /admin/operations[?operationId=]` | operations with `receivedCount`, `executionCount`, remembered `faults` and `resultPublishAt` (also `make carrier-ops`) |
-| `GET` / `PUT /admin/faults` | fault mode switches (also `make faults`, `make fault-*`) |
+| `POST /operations` | принять операцию; `202` и на повтор с тем же содержимым (без второго исполнения), `409 PAYLOAD_MISMATCH` на тот же `operationId` с другим содержимым |
+| `GET /operations/{operationId}` | состояние у перевозчика и последний результат (для сверки); `404`, если операция неизвестна |
+| `GET /results?after=N&limit=100` | лента результатов после курсора `N`: `IN_PROGRESS`, затем `SUCCEEDED` / `REJECTED` |
+| `GET /admin/operations[?operationId=]` | операции с `receivedCount`, `executionCount`, запомненными `faults` и `resultPublishAt` (то же `make carrier-ops`) |
+| `GET` / `PUT /admin/faults` | выключатели режимов сбоев (то же `make faults`, `make fault-*`) |
 
-- Operations are executed in the background about a second after receipt.
-- The outcome is deterministic: weight over 10 000 kg or an address containing `тест-отказ` → rejected; otherwise a tracking number `TRK-…` and price `300 + 25 × weight`.
-- Assumption: no authentication — the emulator is a local test stand inside the Docker network.
+- Операции исполняются в фоне примерно через секунду после приёма.
+- Исход детерминирован: вес больше 10 000 кг или `тест-отказ` в адресе → отказ; иначе номер отправления `TRK-…` и стоимость `300 + 25 × вес`.
+- Допущение: аутентификации нет — эмулятор это локальный тестовый стенд внутри сети Docker.
 
 ```bash
 ID=$(uuidgen)
@@ -125,114 +125,97 @@ curl -s localhost:8081/operations/$ID
 curl -s "localhost:8081/results?after=0"
 ```
 
-### Fault modes
+### Режимы сбоев
 
-Four switches in the emulator's memory (all off after a restart): `unavailable` (`503` on the exchange endpoints), `loseResponse` (the response to the first receipt is held until the operation is executed and 10 s have passed — longer than dispatch's 5 s timeout), `duplicate` (every feed entry published twice under the same `messageId`), `delayed` (executed at once, feed entries published after 15 s on the stack, the final result before `IN_PROGRESS`). `duplicate` and `delayed` are remembered by an operation when it is received. Every `make fault-*` switches on only its mode; combinations go through `PUT /admin/faults`. Delays: `CARRIER_LOSE_RESPONSE_DELAY`, `CARRIER_DELAYED_RESULT_DELAY`.
+Четыре выключателя в памяти эмулятора (после его перезапуска все выключены):
+- `unavailable` — `503` на эндпоинтах обмена;
+- `loseResponse` — ответ на первый приём держится, пока операция не исполнена и не прошло 10 с, то есть дольше таймаута `dispatch` (5 с);
+- `duplicate` — каждая запись ленты публикуется дважды с одним `messageId`;
+- `delayed` — операция исполняется сразу, а записи ленты публикуются через 15 с (на стенде), итог раньше `IN_PROGRESS`.
+
+`duplicate` и `delayed` запоминаются операцией в момент приёма. Каждая `make fault-*` включает только свой режим, сочетания задаются через `PUT /admin/faults`. Задержки: `CARRIER_LOSE_RESPONSE_DELAY`, `CARRIER_DELAYED_RESULT_DELAY`.
 
 ```bash
-make fault-lose-response   # create a request → result via the feed, acknowledged via RESULT, no resend
-make carrier-ops           # one operation, receivedCount = 1, state = EXECUTED
+make fault-lose-response   # создать заявку → итог по ленте, подтверждение через RESULT, повтора нет
+make carrier-ops           # одна операция, receivedCount = 1, state = EXECUTED
 curl -X PUT localhost:8081/admin/faults -H 'Content-Type: application/json' \
   -d '{"unavailable":false,"loseResponse":true,"duplicate":false,"delayed":true}'
-                           # create a request → UNKNOWN, resend, ACKNOWLEDGED via RESPONSE, result after ~15 s
-make carrier-ops           # one operation, receivedCount = 2, state = EXECUTED
-make fault-duplicate       # create a request → one result, two entries per message in the feed
-make fault-delayed         # create a request → result after ~15 s, the late IN_PROGRESS is ignored
-make fault-unavailable     # create a request → RETRY_WAIT; then make fault-off → result
+                           # создать заявку → UNKNOWN, повтор, ACKNOWLEDGED через RESPONSE, итог через ~15 с
+make carrier-ops           # одна операция, receivedCount = 2, state = EXECUTED
+make fault-duplicate       # создать заявку → итог один, в ленте по две записи на сообщение
+make fault-delayed         # создать заявку → итог через ~15 с, запоздавший IN_PROGRESS игнорируется
+make fault-unavailable     # создать заявку → RETRY_WAIT; затем make fault-off → итог
 make fault-off
-make faults                # current switches
+make faults                # текущие выключатели
 ```
 
-What to look at: the dispatch card as an operator (`deliveryStatus`, `businessStatus`, `exchange.attempts`, `exchange.acknowledgedVia`, `exchange.lastError`), `make carrier-ops` (exactly one operation per request, `receivedCount`, `faults`, `resultPublishAt`) and the emulator log (`make logs-carrier`, lines `Fault <mode>: …`).
+Куда смотреть: карточка `dispatch` под оператором (`deliveryStatus`, `businessStatus`, `exchange.attempts`, `exchange.acknowledgedVia`, `exchange.lastError`), `make carrier-ops` (ровно одна операция на заявку, `receivedCount`, `faults`, `resultPublishAt`) и лог эмулятора (`make logs-carrier`, строки `Fault <mode>: …`).
 
-### Crash and restart during the exchange
+### Падение и перезапуск во время обмена
 
-There are no special restart scenarios: whenever dispatch or the database dies and however long it stays down, after
-the start every accepted request reaches its result, nothing is lost and nothing is executed twice (D04, D-NF01,
-NF03). Specific moments (mid-send, before the feed is read, an expired claim) are covered by integration tests
-(`SendWorkerTests`, `FeedPollerTests`); on the stack you check it the way it happens in real life.
+Специальных сценариев перезапуска нет. Когда бы `dispatch` или база ни упали и сколько бы ни лежали, после старта каждая принятая заявка доходит до результата, ничего не теряется и ничего не исполняется дважды (D04, D-NF01, NF03). Конкретные моменты (посреди отправки, до чтения ленты, истёкший захват) покрыты интеграционными тестами (`SendWorkerTests`, `FeedPollerTests`), а на стенде это проверяется так, как бывает в жизни.
 
 ```bash
-make dispatch-kill     # SIGKILL: dispatch dies in the middle of whatever it is doing
-make dispatch-start    # start it again and wait until it is healthy
-make db-kill           # the same for PostgreSQL
+make dispatch-kill     # SIGKILL: dispatch умирает посреди того, что делал
+make dispatch-start    # запустить снова и дождаться health
+make db-kill           # то же для PostgreSQL
 make db-start
 ```
 
-1. Create requests in the UI: several at once, with any fault modes on (`make fault-*`) or none.
-2. At any moment run `make dispatch-kill`. Wait as long as you like, then `make dispatch-start` and sign in again:
-   sessions are kept in memory.
-3. Expected:
-   - every request reaches its result (registry and card);
-   - every operation has `executionCount = 1` in `make carrier-ops`;
-   - all requests created before the crash are still there.
+1. Создайте заявки в интерфейсе: несколько сразу, с любыми режимами сбоев (`make fault-*`) или без них.
+2. В любой момент выполните `make dispatch-kill`. Подождите сколько хотите, затем `make dispatch-start` и войдите заново: сессии хранятся в памяти.
+3. Ожидаемо:
+   - каждая заявка дошла до результата (реестр и карточка);
+   - у каждой операции `executionCount = 1` в `make carrier-ops`;
+   - все заявки, созданные до падения, на месте.
 
-Notes:
-- After a fault is switched off a request waits for its «Следующая попытка» (pauses of 5, 10, 20, 40 … s), and the feed
-  poller may pause for up to 30 s after the carrier was unavailable.
-- With `unavailable` kept on for more than about 10 minutes the 8 attempts run out and the request becomes `FAILED`.
-  That is expected: the operator decides.
-- `make db-kill` / `make db-start` do not restart dispatch, so the session survives. PostgreSQL is shared, so
-  carrier-emulator loses its database too and recovers by itself. While the database is down the UI shows loading
-  errors.
+Замечания:
+- После выключения сбоя заявка ждёт своей «Следующей попытки» (паузы 5, 10, 20, 40… с), а опрос ленты после недоступности перевозчика может сделать паузу до 30 с.
+- Если держать `unavailable` включённым дольше ~10 минут, 8 попыток кончатся и заявка перейдёт в `FAILED`. Это ожидаемо: дальше решает оператор.
+- `make db-kill` / `make db-start` не перезапускают `dispatch`, поэтому сессия сохраняется. PostgreSQL общий, так что эмулятор тоже теряет базу и восстанавливается сам. Пока база лежит, интерфейс показывает ошибки загрузки. `make db-start` ждёт, пока оба приложения снова станут здоровы, это может занять около минуты.
 
-## Tests
+## Тесты
 
 ```bash
-make test      # unit + integration tests (integration tests use Testcontainers: Docker must be running)
-make up        # start the stack
-make e2e       # end-to-end tests over real HTTP against the running stack
-make contracts-lint   # lint contracts/ (after changing a contract)
+make test      # unit- и интеграционные тесты (интеграционные используют Testcontainers: нужен запущенный Docker)
+make up        # поднять стенд
+make e2e       # сквозные тесты по настоящему HTTP против запущенного стенда
+make contracts-lint   # проверить contracts/ (после изменения контракта)
 ```
 
-e2e tests create their own data and can run repeatedly against a non-empty database.
+e2e-тесты создают свои данные и могут запускаться повторно на непустой базе.
 
-## Development
+## Разработка
 
 ```bash
-make db        # start only PostgreSQL
-make run       # run dispatch locally (./gradlew :dispatch:bootRun)
-make test      # tests; integration tests use Testcontainers, so Docker must be running
+make db        # только PostgreSQL
+make run       # dispatch локально (./gradlew :dispatch:bootRun)
+make test      # тесты; интеграционные используют Testcontainers, поэтому нужен запущенный Docker
 ```
 
-`make help` lists all commands.
+`make help` показывает все команды.
 
-## Conventions
+## Соглашения
 
-- Instants are stored and processed in UTC; the business time zone is `APP_TIMEZONE` (default `Europe/Moscow`).
-- The database schema is managed only by Flyway migrations (`dispatch/src/main/resources/db/migration`).
-- Data access: Spring Data JDBC for entities, explicit SQL via `JdbcClient` for the exchange core; no JPA/Hibernate.
+- Моменты времени хранятся и обрабатываются в UTC; бизнес-часовой пояс — `APP_TIMEZONE` (по умолчанию `Europe/Moscow`).
+- Схемой базы управляют только миграции Flyway (`dispatch/src/main/resources/db/migration`).
+- Доступ к данным: Spring Data JDBC для сущностей, явный SQL через `JdbcClient` для ядра обмена; без JPA/Hibernate.
 
-## Web client
+## Веб-клиент
 
 ```bash
-make web-install   # once: install web/ dependencies and the Playwright browser
-make web-dev       # http://localhost:5173, proxies /api to dispatch on :8080 (make run or make up)
-make web-build     # contract types check, typecheck, unit tests, production build
-make web-e2e       # Playwright: against the dev server, then against the stack on :3000 (make up first)
+make web-install   # один раз: зависимости web/ и браузер для Playwright
+make web-dev       # http://localhost:5173, проксирует /api в dispatch на :8080 (make run или make up)
+make web-build     # проверка типов по контракту, typecheck, unit-тесты, production-сборка
+make web-e2e       # Playwright: против dev-сервера, затем против стенда на :3000 (сначала make up)
 ```
 
-- Stack: React 19, TypeScript (strict), Vite, TanStack Router, TanStack Query, Mantine; pnpm project outside Gradle.
-- Design system in the spirit of Linear (dark by default, light scheme behind the switch in the header):
-  tokens, Mantine theme and rules in `docs/design-system.md`.
-- Modular structure: `src/app/` wires the app (query client, router, theme), `src/shared/` holds code used by
-  several modules, each feature module gets its own folder (and its own `e2e/<module>/` folder).
-- Data layer `src/shared/api/`: types generated from `contracts/dispatch-api.yaml`, one HTTP client with the
-  CSRF header and Problem Details errors. After changing the contract run `make web-api-types`;
-  `make web-build` fails while the types are out of date.
-- Sign-in: open http://localhost:3000 and sign in as a demo user (above; the login page lists them too).
-  Any page opened without a session leads to the login page and back afterwards. The header shows the user,
-  role and service, and has the sign-out button. When the session is lost (sign-out in another tab,
-  `dispatch` restarted) the next action leads to the login page.
-- Requests: after sign-in the registry opens (`/requests`). Filters «Результат», «Доставка» (operators) and
-  «Только просроченные», the sort and the page are kept in the address, so a link or Back restores them; on a
-  phone the table becomes cards and the filters move into a bottom sheet. The list refreshes itself every 10 s.
-- Initiators create a request with «Новая заявка»: the form checks the fields, shows «Проверьте данные», and
-  then sends; a repeated click or a retry after a lost answer creates one request. The deadline cannot be
-  before today in the business time zone.
-- The request card shows the content (read-only — it cannot change after creation), both statuses, the
-  carrier's result and, for operators, the exchange details; it refreshes every 5 s until the result is final.
-  Anyone who sees the request can edit the comment, operators choose the assignee; if someone else changed
-  the same field meanwhile, nothing is overwritten silently.
-- `make web-e2e` runs the browser tests against the stack as it was built: after changing `web/`, rebuild it
-  with `make up` (or `docker compose up -d --build web`) first.
+- Стек: React 19, TypeScript (strict), Vite, TanStack Router, TanStack Query, Mantine; pnpm-проект вне Gradle.
+- Дизайн-система в духе Linear (по умолчанию тёмная, светлая схема — переключателем в шапке): токены, тема Mantine и правила в `docs/design-system.md`.
+- Модульная структура: `src/app/` связывает приложение (query client, роутер, тема), в `src/shared/` код, общий для нескольких модулей, у каждого функционального модуля своя папка (и своя `e2e/<module>/`).
+- Слой данных `src/shared/api/`: типы, сгенерированные из `contracts/dispatch-api.yaml`, один HTTP-клиент с CSRF-заголовком и ошибками Problem Details. После изменения контракта выполните `make web-api-types`; `make web-build` падает, пока типы устарели.
+- Вход: откройте http://localhost:3000 и войдите демо-пользователем (см. выше; они перечислены и на странице входа). Любая страница без сессии ведёт на страницу входа, а после входа обратно. В шапке пользователь, роль, служба и кнопка выхода. Если сессия потеряна (выход в другой вкладке, перезапуск `dispatch`), следующее действие ведёт на страницу входа.
+- Заявки: после входа открывается реестр (`/requests`). Фильтры «Результат», «Доставка» (для операторов) и «Только просроченные», сортировка и страница хранятся в адресе, поэтому ссылка или «Назад» их восстанавливают. На телефоне таблица превращается в карточки, а фильтры переезжают в нижнюю шторку. Список обновляется сам каждые 10 с.
+- Инициатор создаёт заявку кнопкой «Новая заявка»: форма проверяет поля, показывает «Проверьте данные» и только потом отправляет. Повторный клик или повтор после потерянного ответа создают одну заявку. Срок не может быть раньше сегодняшнего дня в бизнес-часовом поясе.
+- Карточка заявки показывает содержимое (только чтение — после создания оно не меняется), оба статуса, результат перевозчика и, для операторов, детали обмена. Она обновляется каждые 5 с, пока результат не итоговый. Комментарий правит любой, кто видит заявку, ответственного выбирает оператор. Если кто-то другой тем временем изменил то же поле, ничего не перезаписывается молча.
+- `make web-e2e` гоняет браузерные тесты против стенда в том виде, в каком он собран: после изменений в `web/` сначала пересоберите его через `make up` (или `docker compose up -d --build web`).
