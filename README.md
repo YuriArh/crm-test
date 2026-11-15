@@ -145,6 +145,37 @@ make faults                # current switches
 
 What to look at: the dispatch card as an operator (`deliveryStatus`, `businessStatus`, `exchange.attempts`, `exchange.acknowledgedVia`, `exchange.lastError`), `make carrier-ops` (exactly one operation per request, `receivedCount`, `faults`, `resultPublishAt`) and the emulator log (`make logs-carrier`, lines `Fault <mode>: …`).
 
+### Crash and restart during the exchange
+
+There are no special restart scenarios: whenever dispatch or the database dies and however long it stays down, after
+the start every accepted request reaches its result, nothing is lost and nothing is executed twice (D04, D-NF01,
+NF03). Specific moments (mid-send, before the feed is read, an expired claim) are covered by integration tests
+(`SendWorkerTests`, `FeedPollerTests`); on the stack you check it the way it happens in real life.
+
+```bash
+make dispatch-kill     # SIGKILL: dispatch dies in the middle of whatever it is doing
+make dispatch-start    # start it again and wait until it is healthy
+make db-kill           # the same for PostgreSQL
+make db-start
+```
+
+1. Create requests in the UI: several at once, with any fault modes on (`make fault-*`) or none.
+2. At any moment run `make dispatch-kill`. Wait as long as you like, then `make dispatch-start` and sign in again:
+   sessions are kept in memory.
+3. Expected:
+   - every request reaches its result (registry and card);
+   - every operation has `executionCount = 1` in `make carrier-ops`;
+   - all requests created before the crash are still there.
+
+Notes:
+- After a fault is switched off a request waits for its «Следующая попытка» (pauses of 5, 10, 20, 40 … s), and the feed
+  poller may pause for up to 30 s after the carrier was unavailable.
+- With `unavailable` kept on for more than about 10 minutes the 8 attempts run out and the request becomes `FAILED`.
+  That is expected: the operator decides.
+- `make db-kill` / `make db-start` do not restart dispatch, so the session survives. PostgreSQL is shared, so
+  carrier-emulator loses its database too and recovers by itself. While the database is down the UI shows loading
+  errors.
+
 ## Tests
 
 ```bash

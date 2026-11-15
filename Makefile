@@ -4,6 +4,7 @@ export
 
 .PHONY: help up down reset logs logs-carrier ps db build test run wait e2e seed contracts-lint carrier-ops \
         faults fault-unavailable fault-lose-response fault-duplicate fault-delayed fault-off \
+        dispatch-kill dispatch-start db-kill db-start \
         web-install web-dev web-build web-test web-e2e web-api-types web-api-check
 
 REDOCLY_IMAGE := redocly/cli:1.34.3
@@ -55,6 +56,22 @@ wait: ## Wait until dispatch and carrier-emulator report healthy (up to 90 s eac
 
 e2e: wait ## Run end-to-end tests against the running stack (start it with make up)
 	E2E_BASE_URL=$(E2E_BASE_URL) CARRIER_BASE_URL=$(CARRIER_BASE_URL) ./gradlew :e2e:test -Pe2e
+
+# Crash and restart during the exchange (D04, D-NF01, NF03; docs/PLAN.md, stage 2, item 2). SIGKILL, not a
+# graceful stop: the process dies mid-call like a real crash. When to kill and how long to stay down is up to you.
+dispatch-kill: ## Crash dispatch (SIGKILL) in the middle of whatever it is doing
+	docker compose kill dispatch
+
+dispatch-start: ## Start dispatch after dispatch-kill and wait until it is healthy (sign in again: sessions are in memory)
+	docker compose start dispatch
+	@$(MAKE) --no-print-directory wait
+
+db-kill: ## Crash PostgreSQL (SIGKILL); dispatch and carrier-emulator lose their databases but keep running
+	docker compose kill postgres
+
+db-start: ## Start PostgreSQL after db-kill and wait until dispatch and carrier-emulator are healthy again
+	docker compose start postgres
+	@$(MAKE) --no-print-directory wait
 
 seed: wait ## Create demo requests through the API (safe to re-run; start the stack with make up)
 	./scripts/seed.sh $(E2E_BASE_URL)
