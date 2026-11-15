@@ -4,7 +4,6 @@ import static com.acme.dispatch.common.SqlTime.toSql;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Collection;
 import java.util.UUID;
 
 import com.acme.dispatch.carrier.SubmitResult;
@@ -49,17 +48,21 @@ public class ExchangeAttemptDao {
                 .update();
     }
 
-    /** Attempts cut short by a worker crash end with an unknown outcome. */
-    void finishInterrupted(Collection<UUID> operationIds, Instant now) {
-        if (operationIds.isEmpty()) {
-            return;
-        }
-        jdbc.sql("""
+    /**
+     * Attempts still open after the lease were cut short by a worker crash: they end with an unknown outcome.
+     * The operation's state is not consulted — a result or (later) an operator may have moved it out of
+     * {@code SENDING} before the lease ran out, and nobody else would close the attempt.
+     *
+     * @param startedBefore attempts started strictly before this instant are closed (now minus the lease)
+     * @return how many attempts were closed
+     */
+    int finishExpired(Instant now, Instant startedBefore) {
+        return jdbc.sql("""
                         UPDATE exchange_attempt
                            SET finished_at = :now, outcome = 'UNKNOWN', error = 'Send was interrupted (lease expired)'
-                         WHERE operation_id IN (:operationIds) AND finished_at IS NULL""")
+                         WHERE finished_at IS NULL AND started_at < :startedBefore""")
                 .param("now", toSql(now))
-                .param("operationIds", operationIds)
+                .param("startedBefore", toSql(startedBefore))
                 .update();
     }
 }

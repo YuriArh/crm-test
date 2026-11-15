@@ -3,7 +3,9 @@ package com.acme.dispatch.exchange;
 import static com.acme.dispatch.common.SqlTime.toSql;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.acme.dispatch.carrier.SubmitRequest;
@@ -44,31 +46,28 @@ public class SendQueueDao {
     }
 
     /**
-     * Claims due operations for sending: {@code SENDING} with a lease, one more attempt counted. They come back
-     * in due order (oldest first): {@code UPDATE … RETURNING} returns rows in no particular order, so the
-     * claimed rows are sorted in the outer query.
+     * Claims the most overdue operation for sending, right before it is sent: {@code SENDING} with a lease, one more
+     * attempt counted. One at a time because the worker sends one at a time — a claimed batch would wait for its
+     * turn under a lease that is already running ({@code docs/dispatch-design.md} §5).
      */
-    List<Claimed> claimDue(Instant now, Instant leaseUntil, int limit) {
+    Optional<Claimed> claimNext(Instant now, Instant leaseUntil) {
         return jdbc.sql("""
-                        WITH claimed AS (
-                            UPDATE dispatch_operation o
-                               SET delivery_status = 'SENDING', locked_until = :leaseUntil, attempts = o.attempts + 1,
-                                   updated_at = :now
-                              FROM delivery_request r
-                             WHERE r.id = o.request_id
-                               AND o.request_id IN (
-                                   SELECT request_id FROM dispatch_operation
-                                    WHERE delivery_status IN ('PENDING', 'RETRY_WAIT', 'UNKNOWN')
-                                      AND next_attempt_at <= :now
-                                    ORDER BY next_attempt_at, request_id
-                                    LIMIT :limit
-                                    FOR UPDATE SKIP LOCKED)
-                            RETURNING o.request_id, o.operation_id, o.attempts, o.next_attempt_at,
-                                      r.cargo_description, r.weight_kg, r.delivery_address, r.deadline)
-                        SELECT * FROM claimed ORDER BY next_attempt_at, request_id""")
+                        UPDATE dispatch_operation o
+                           SET delivery_status = 'SENDING', locked_until = :leaseUntil, attempts = o.attempts + 1,
+                               updated_at = :now
+                          FROM delivery_request r
+                         WHERE r.id = o.request_id
+                           AND o.request_id = (
+                               SELECT request_id FROM dispatch_operation
+                                WHERE delivery_status IN ('PENDING', 'RETRY_WAIT', 'UNKNOWN')
+                                  AND next_attempt_at <= :now
+                                ORDER BY next_attempt_at, request_id
+                                LIMIT 1
+                                FOR UPDATE SKIP LOCKED)
+                        RETURNING o.request_id, o.operation_id, o.attempts,
+                                  r.cargo_description, r.weight_kg, r.delivery_address, r.deadline""")
                 .param("now", toSql(now))
                 .param("leaseUntil", toSql(leaseUntil))
-                .param("limit", limit)
                 .query((rs, row) -> new Claimed(
                         rs.getObject("request_id", UUID.class),
                         rs.getObject("operation_id", UUID.class),
@@ -78,8 +77,9 @@ public class SendQueueDao {
                                 rs.getString("cargo_description"),
                                 DeliveryContent.canonicalWeight(rs.getBigDecimal("weight_kg")),
                                 rs.getString("delivery_address"),
-                                rs.getObject("deadline", java.time.LocalDate.class))))
-                .list();
+                                rs.getObject("deadline", LocalDate.class)),
+                        now))
+                .optional();
     }
 
     /** The carrier confirmed receipt. */
@@ -127,8 +127,10 @@ public class SendQueueDao {
     /**
      * An operation claimed for sending.
      *
-     * @param attempt number of this attempt (1-based); also the fencing token for the completion update
+     * @param attempt   number of this attempt (1-based); also the fencing token for the completion update
+     * @param claimedAt when it was claimed: the start of the attempt, written to {@code exchange_attempt.started_at}
+     *                  and the base of its duration
      */
-    record Claimed(UUID requestId, UUID operationId, int attempt, SubmitRequest request) {
+    record Claimed(UUID requestId, UUID operationId, int attempt, SubmitRequest request, Instant claimedAt) {
     }
 }
