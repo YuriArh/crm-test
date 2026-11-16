@@ -65,8 +65,8 @@ public class AuthController {
     @GetMapping("/csrf")
     CsrfResponse csrf(HttpServletRequest request, CsrfToken maskedToken) {
         // The request attribute CsrfToken is XOR-masked; the header must carry the raw (cookie) value,
-        // which the CsrfFilter exposes as the repository's deferred token. The header name is our constant
-        // (the repository is configured with it) rather than the token's, which tests may replace.
+        // which the CsrfFilter exposes as the repository's deferred token. The header name is our constant:
+        // the repository is configured with it, so it is the one the CsrfFilter checks.
         CsrfToken token = request.getAttribute(DeferredCsrfToken.class.getName()) instanceof DeferredCsrfToken deferred
                 ? deferred.get()
                 : maskedToken;

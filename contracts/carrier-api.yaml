@@ -263,13 +263,13 @@ paths:
                 $ref: '#/components/schemas/Faults'
               examples:
                 allOff:
-                  value: {unavailable: false, loseResponse: false, duplicate: false, delayed: false}
+                  value: {unavailable: false, loseResponse: false, duplicate: false, delayed: false, malformed: false}
     put:
       tags: [admin]
       operationId: setFaults
       summary: Set fault modes
       description: |
-        Switches fault modes on or off; the body always carries all four. Modes live in memory: after an
+        Switches fault modes on or off; the body always carries all five. Modes live in memory: after an
         emulator restart all are off. Delays are set in the emulator configuration, not here.
         - `unavailable` — the exchange endpoints (`POST /operations`, `GET /operations/{operationId}`,
           `GET /results`) answer `503` without reading the request; operations already received are still
@@ -281,7 +281,12 @@ paths:
         - `duplicate` — every feed entry of the operation is published twice with the same `messageId`;
         - `delayed` — the operation is executed at once (and `GET /operations/{operationId}` shows its result),
           but its feed entries are published after a delay (default 60 s): the final result first, then
-          `IN_PROGRESS`, which therefore arrives stale.
+          `IN_PROGRESS`, which therefore arrives stale;
+        - `malformed` — **deliberately breaks this contract**: while it is on, every `SUCCEEDED` entry in a
+          `GET /results` response carries the price `10000000000000.00` (beyond `maximum`). Only the response is
+          spoiled: stored entries, `GET /operations/{operationId}` and the admin view keep the real price. It acts
+          at the moment of each feed read and is not remembered by operations. For checking that a client does not
+          let one broken record stop its feed.
 
         `duplicate` and `delayed` are remembered by an operation when it is first received: an operation
         received while the mode was on is affected even if the mode is switched off before it is executed.
@@ -293,7 +298,7 @@ paths:
               $ref: '#/components/schemas/Faults'
             examples:
               loseResponse:
-                value: {unavailable: false, loseResponse: true, duplicate: false, delayed: false}
+                value: {unavailable: false, loseResponse: true, duplicate: false, delayed: false, malformed: false}
       responses:
         '200':
           description: Fault modes after the change.
@@ -477,7 +482,9 @@ components:
           format: uuid
         sequence:
           type: integer
+          format: int32
           minimum: 1
+          maximum: 2147483647
           description: Order of results within one operation; a greater value is more recent.
         status:
           type: string
@@ -488,10 +495,15 @@ components:
         price:
           type: [number, 'null']
           minimum: 0
-          description: Delivery price in rubles, two decimal places.
+          maximum: 9999999999.99
+          multipleOf: 0.01
+          description: Delivery price in rubles, at most two decimal places.
         reason:
           type: [string, 'null']
-          description: Rejection reason.
+          minLength: 1
+          maxLength: 1000
+          pattern: '^[^\x00-\x1F\x7F]*$'
+          description: Rejection reason, without control characters.
         occurredAt:
           type: string
           format: date-time
@@ -536,7 +548,7 @@ components:
     Faults:
       type: object
       additionalProperties: false
-      required: [unavailable, loseResponse, duplicate, delayed]
+      required: [unavailable, loseResponse, duplicate, delayed, malformed]
       properties:
         unavailable:
           type: boolean
@@ -545,6 +557,8 @@ components:
         duplicate:
           type: boolean
         delayed:
+          type: boolean
+        malformed:
           type: boolean
 
     AdminOperation:

@@ -65,13 +65,15 @@ public final class CarrierClient {
     // --- fault modes ---
 
     /** Fault mode switches ({@code Faults} in carrier-api.yaml). */
-    public record Faults(boolean unavailable, boolean loseResponse, boolean duplicate, boolean delayed) {
+    public record Faults(boolean unavailable, boolean loseResponse, boolean duplicate, boolean delayed,
+                         boolean malformed) {
 
-        public static final Faults OFF = new Faults(false, false, false, false);
-        public static final Faults UNAVAILABLE = new Faults(true, false, false, false);
-        public static final Faults LOSE_RESPONSE = new Faults(false, true, false, false);
-        public static final Faults DUPLICATE = new Faults(false, false, true, false);
-        public static final Faults DELAYED = new Faults(false, false, false, true);
+        public static final Faults OFF = new Faults(false, false, false, false, false);
+        public static final Faults UNAVAILABLE = new Faults(true, false, false, false, false);
+        public static final Faults LOSE_RESPONSE = new Faults(false, true, false, false, false);
+        public static final Faults DUPLICATE = new Faults(false, false, true, false, false);
+        public static final Faults DELAYED = new Faults(false, false, false, true, false);
+        public static final Faults MALFORMED = new Faults(false, false, false, false, true);
     }
 
     /** {@code PUT /admin/faults}; fails the test unless the emulator took the new state. */

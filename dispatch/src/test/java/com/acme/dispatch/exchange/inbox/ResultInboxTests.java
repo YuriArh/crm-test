@@ -23,6 +23,7 @@ import com.acme.dispatch.support.FakeCarrier;
 import com.acme.dispatch.support.IntegrationTest;
 import com.acme.dispatch.support.MutableClock;
 import com.acme.dispatch.support.TestRequests;
+import com.acme.dispatch.support.TestResults;
 import com.acme.dispatch.support.TestRows;
 
 import tools.jackson.databind.JsonNode;
@@ -32,13 +33,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.transaction.support.TransactionTemplate;
 
 @IntegrationTest
 class ResultInboxTests {
 
     @Autowired
-    ResultInbox inbox;
+    TestResults results;
     @Autowired
     TestRequests requests;
     @Autowired
@@ -47,8 +47,6 @@ class ResultInboxTests {
     SendWorker sender;
     @Autowired
     FakeCarrier carrier;
-    @Autowired
-    TransactionTemplate transaction;
     @Autowired
     MutableClock clock;
     @Autowired
@@ -69,11 +67,11 @@ class ResultInboxTests {
     void inProgressThenSucceededUpdateTheRequest() {
         RequestCard request = requests.create("12.5");
 
-        assertThat(accept(inProgress(1, request.operationId()))).isEqualTo(ResultInbox.Outcome.APPLIED);
+        assertThat(accept(inProgress(1, request.operationId()))).isEqualTo("APPLIED");
         assertThat(row(request)).isEqualTo(new Row("IN_PROGRESS", null, null, null, null, 1));
 
-        assertThat(accept(succeeded(2, request.operationId(), "TRK-1", "612.50"))).isEqualTo(ResultInbox.Outcome.APPLIED);
-        assertThat(row(request)).isEqualTo(new Row("SUCCEEDED", "TRK-1", new BigDecimal("612.50"), null,
+        assertThat(accept(succeeded(2, request.operationId(), "TRK-00000001", "612.50"))).isEqualTo("APPLIED");
+        assertThat(row(request)).isEqualTo(new Row("SUCCEEDED", "TRK-00000001", new BigDecimal("612.50"), null,
                 Instant.parse("2026-11-12T09:00:05Z"), 2));
         assertThat(operation(request).lastAppliedSeq()).isEqualTo(2);
         assertThat(processing(request)).containsExactly("1:APPLIED", "2:APPLIED");
@@ -94,10 +92,10 @@ class ResultInboxTests {
     @Test
     void repeatedMessageIsCountedWithoutEffect() {
         RequestCard request = requests.create("1");
-        JsonNode message = succeeded(1, request.operationId(), "TRK-1", "325.00");
+        JsonNode message = succeeded(1, request.operationId(), "TRK-00000001", "325.00");
         accept(message);
 
-        assertThat(accept(message)).isEqualTo(ResultInbox.Outcome.DUPLICATE);
+        assertThat(accept(message)).isEqualTo("DUPLICATE");
 
         assertThat(row(request).version()).isEqualTo(1);
         assertThat(jdbc.sql("SELECT count(*), max(duplicate_count) FROM inbox WHERE operation_id = :id")
@@ -108,9 +106,9 @@ class ResultInboxTests {
     @Test
     void olderResultIsStaleAndDoesNotRollBack() {
         RequestCard request = requests.create("1");
-        accept(succeeded(1, request.operationId(), "TRK-1", "325.00"));
+        accept(succeeded(1, request.operationId(), "TRK-00000001", "325.00"));
 
-        assertThat(accept(inProgress(2, request.operationId()))).isEqualTo(ResultInbox.Outcome.STALE);
+        assertThat(accept(inProgress(2, request.operationId()))).isEqualTo("STALE");
 
         assertThat(row(request).status()).isEqualTo("SUCCEEDED");
         assertThat(row(request).version()).isEqualTo(1);
@@ -119,9 +117,9 @@ class ResultInboxTests {
     @Test
     void sameSequenceWithOtherContentIsAConflict() {
         RequestCard request = requests.create("1");
-        accept(succeeded(1, request.operationId(), "TRK-1", "325.00"));
+        accept(succeeded(1, request.operationId(), "TRK-00000001", "325.00"));
 
-        assertThat(accept(rejected(2, request.operationId(), "Передумали"))).isEqualTo(ResultInbox.Outcome.CONFLICT);
+        assertThat(accept(rejected(2, request.operationId(), "Передумали"))).isEqualTo("CONFLICT");
 
         assertThat(row(request).status()).isEqualTo("SUCCEEDED");
         assertThat(jdbc.sql("SELECT reason FROM inbox WHERE operation_id = :id AND processing_status = 'CONFLICT'")
@@ -132,16 +130,16 @@ class ResultInboxTests {
     @Test
     void sameSequenceWithSameContentUnderANewMessageIdIsStale() {
         RequestCard request = requests.create("1");
-        accept(succeeded(1, request.operationId(), "TRK-1", "325.00"));
+        accept(succeeded(1, request.operationId(), "TRK-00000001", "325.00"));
 
-        assertThat(accept(succeeded(2, request.operationId(), "TRK-1", "325.0"))).isEqualTo(ResultInbox.Outcome.STALE);
+        assertThat(accept(succeeded(2, request.operationId(), "TRK-00000001", "325.0"))).isEqualTo("STALE");
     }
 
     @Test
     void resultForAnUnknownOperationIsInvalid() {
         UUID unknown = UUID.randomUUID();
 
-        assertThat(accept(inProgress(1, unknown))).isEqualTo(ResultInbox.Outcome.INVALID);
+        assertThat(accept(inProgress(1, unknown))).isEqualTo("INVALID");
 
         assertThat(jdbc.sql("SELECT processing_status || ':' || reason FROM inbox WHERE operation_id = :id")
                 .param("id", unknown).query(String.class).single())
@@ -151,11 +149,11 @@ class ResultInboxTests {
     @Test
     void malformedEntryIsKeptForReview() {
         assertThat(accept(raw("{\"feedSeq\": 9, \"messageId\": \"bad-1\", \"status\": \"DONE\"}")))
-                .isEqualTo(ResultInbox.Outcome.INVALID);
+                .isEqualTo("INVALID");
         assertThat(accept(raw("{\"feedSeq\": 9, \"messageId\": \"bad-1\", \"status\": \"DONE\"}")))
-                .as("repeat of the same broken message").isEqualTo(ResultInbox.Outcome.DUPLICATE);
+                .as("repeat of the same broken message").isEqualTo("DUPLICATE");
 
-        assertThat(jdbc.sql("SELECT processing_status || ':' || (payload->>'status') FROM inbox WHERE message_id = 'bad-1'")
+        assertThat(jdbc.sql("SELECT processing_status || ':' || (payload::jsonb->>'status') FROM inbox WHERE message_id = 'bad-1'")
                 .query(String.class).single()).isEqualTo("INVALID:DONE");
     }
 
@@ -180,8 +178,7 @@ class ResultInboxTests {
     void resultArrivingDuringASendWinsOverTheSendOutcome() {
         RequestCard request = requests.create("1");
         carrier.answer(new SubmitResult(SubmitOutcome.TEMPORARY_ERROR, 503, "HTTP 503"));
-        carrier.duringSubmit(() -> transaction.executeWithoutResult(status ->
-                inbox.accept(inProgress(1, request.operationId()), InboxSource.FEED)));
+        carrier.duringSubmit(() -> results.deliver(inProgress(1, request.operationId())));
 
         sender.runOnce();
 
@@ -193,8 +190,8 @@ class ResultInboxTests {
                 .as("the attempt is still recorded").isEqualTo("TEMPORARY_ERROR");
     }
 
-    private ResultInbox.Outcome accept(JsonNode entry) {
-        return transaction.execute(status -> inbox.accept(entry, InboxSource.FEED));
+    private String accept(JsonNode entry) {
+        return results.deliver(entry);
     }
 
     private DispatchOperation operation(RequestCard request) {

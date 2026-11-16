@@ -8,8 +8,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 /**
  * Emulator settings.
  *
- * @param executorEnabled   whether the background executor runs on its schedule (off in integration tests,
- *                          which call it directly)
+ * @param executorEnabled   whether the background executor runs on its schedule ({@code CARRIER_EXECUTOR_ENABLED});
+ *                          off, the carrier still receives operations but executes none of them, as a carrier
+ *                          whose back office has stopped
  * @param executorBatchSize operations executed per pass
  * @param faults            fault mode delays ({@code docs/specs/carrier-faults.md})
  */

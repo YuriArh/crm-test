@@ -29,7 +29,7 @@ import org.springframework.test.web.servlet.ResultActions;
 @IntegrationTest
 class UnavailableTests {
 
-    private static final Faults UNAVAILABLE = new Faults(true, false, false, false);
+    private static final Faults UNAVAILABLE = new Faults(true, false, false, false, false);
 
     @Autowired
     MockMvc mockMvc;
@@ -62,7 +62,7 @@ class UnavailableTests {
 
     @Test
     void unavailableWinsOverLoseResponse() throws Exception {
-        faults.set(new Faults(true, true, false, false));
+        faults.set(new Faults(true, true, false, false, false));
         UUID id = UUID.randomUUID();
 
         expectUnavailable(mockMvc.perform(submit(body(id))));

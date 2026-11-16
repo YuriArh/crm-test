@@ -52,13 +52,15 @@ class FaultsTests {
                 .andExpect(jsonPath("$.unavailable").value(false))
                 .andExpect(jsonPath("$.loseResponse").value(false))
                 .andExpect(jsonPath("$.duplicate").value(false))
-                .andExpect(jsonPath("$.delayed").value(false));
+                .andExpect(jsonPath("$.delayed").value(false))
+                .andExpect(jsonPath("$.malformed").value(false));
     }
 
     @Test
     void modesAreSwitchedAndReadBack() throws Exception {
         mockMvc.perform(put("/admin/faults").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"unavailable\":false,\"loseResponse\":true,\"duplicate\":true,\"delayed\":false}"))
+                        .content("{\"unavailable\":false,\"loseResponse\":true,\"duplicate\":true,\"delayed\":false,"
+                                + "\"malformed\":false}"))
                 .andExpect(status().isOk())
                 .andExpect(matchesContract())
                 .andExpect(jsonPath("$.loseResponse").value(true))
@@ -86,7 +88,7 @@ class FaultsTests {
 
     @Test
     void newOperationRemembersDuplicateAndDelayed() throws Exception {
-        faults.set(new Faults(false, false, true, true));
+        faults.set(new Faults(false, false, true, true, false));
         UUID id = UUID.randomUUID();
         mockMvc.perform(submit(body(id))).andExpect(status().isAccepted());
         faults.set(Faults.OFF);
@@ -102,7 +104,7 @@ class FaultsTests {
     void repeatDoesNotChangeTheRememberedModes() throws Exception {
         UUID id = UUID.randomUUID();
         mockMvc.perform(submit(body(id))).andExpect(status().isAccepted());
-        faults.set(new Faults(false, false, true, true));
+        faults.set(new Faults(false, false, true, true, false));
         mockMvc.perform(submit(body(id))).andExpect(status().isAccepted());
 
         mockMvc.perform(get("/admin/operations").param("operationId", id.toString()))

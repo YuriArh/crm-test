@@ -19,8 +19,6 @@ import com.acme.dispatch.auth.CurrentUser;
 import com.acme.dispatch.carrier.SubmitOutcome;
 import com.acme.dispatch.carrier.SubmitRequest;
 import com.acme.dispatch.carrier.SubmitResult;
-import com.acme.dispatch.exchange.inbox.InboxSource;
-import com.acme.dispatch.exchange.inbox.ResultInbox;
 import com.acme.dispatch.request.ExchangeInfo;
 import com.acme.dispatch.request.RequestCard;
 import com.acme.dispatch.request.RequestQueryService;
@@ -30,6 +28,7 @@ import com.acme.dispatch.support.IntegrationTest;
 import com.acme.dispatch.support.MutableClock;
 import com.acme.dispatch.support.TestFeed;
 import com.acme.dispatch.support.TestRequests;
+import com.acme.dispatch.support.TestResults;
 import com.acme.dispatch.support.TestRows;
 
 import org.junit.jupiter.api.AfterEach;
@@ -37,7 +36,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.transaction.support.TransactionTemplate;
 
 @IntegrationTest
 class SendWorkerTests {
@@ -67,9 +65,7 @@ class SendWorkerTests {
     @Autowired
     ExchangeProperties properties;
     @Autowired
-    ResultInbox inbox;
-    @Autowired
-    TransactionTemplate transaction;
+    TestResults results;
 
     @BeforeEach
     void setUp() {
@@ -420,10 +416,9 @@ class SendWorkerTests {
                 .param("operationId", request.operationId())
                 .param("started", toSql(START))
                 .update();
-        // The single result handler, as the feed poller calls it (inside its transaction).
-        ResultInbox.Outcome outcome = transaction.execute(status -> inbox.accept(
-                TestFeed.succeeded(1, request.operationId(), "TRK-1", "325.00"), InboxSource.FEED));
-        assertThat(outcome).isEqualTo(ResultInbox.Outcome.APPLIED);
+        // The result comes in as the feed poller handles it: received, then processed.
+        assertThat(results.deliver(TestFeed.succeeded(1, request.operationId(), "TRK-00000001", "325.00")))
+                .isEqualTo("APPLIED");
         assertThat(operation(request).deliveryStatus()).isEqualTo(DeliveryStatus.ACKNOWLEDGED);
     }
 

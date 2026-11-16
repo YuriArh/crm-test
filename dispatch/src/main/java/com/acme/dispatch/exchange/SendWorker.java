@@ -56,7 +56,7 @@ public class SendWorker {
         this.ids = ids;
         this.transaction = transaction;
         this.properties = properties;
-        this.retryPolicy = RetryPolicy.from(properties);
+        this.retryPolicy = RetryPolicy.forSending(properties);
     }
 
     @Scheduled(fixedDelayString = "${app.exchange.send-interval-ms:1000}")

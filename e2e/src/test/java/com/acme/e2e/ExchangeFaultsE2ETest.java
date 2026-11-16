@@ -105,7 +105,7 @@ class ExchangeFaultsE2ETest {
     @Test
     void loseResponseWithDelayedTimesOutResendsAndIsConfirmedByTheResponse() {
         String cargo = uniqueCargo("loseResponse+delayed");
-        carrier.setFaults(new Faults(false, true, false, true));
+        carrier.setFaults(new Faults(false, true, false, true, false));
         String id = create(cargo);
 
         // The held response outlives dispatch's timeout: the outcome is unknown, a resend is scheduled.
@@ -182,6 +182,36 @@ class ExchangeFaultsE2ETest {
         assertThat(entries).extracting(e -> e.get("sequence").asInt()).containsExactly(2, 1);
         Awaits.sleep(Duration.ofSeconds(3));
         assertUnchanged(id, card);
+    }
+
+    /**
+     * A broken result does not stop the feed (docs/specs/feed-bad-records.md §9): while {@code malformed} is on, the
+     * final result of request A arrives with a price beyond the contract and is not applied; request B, created
+     * after the mode is off, still gets its result. «In progress» and the final result of A are published together
+     * and read in one page, so once A shows IN_PROGRESS its broken final result has been read.
+     */
+    @Test
+    void malformedResultIsNotAppliedAndDoesNotStopTheFeed() {
+        String cargoA = uniqueCargo("malformed");
+        carrier.setFaults(Faults.MALFORMED);
+        String a = create(cargoA);
+
+        JsonNode inProgress = Awaits.card(operator, a, "IN_PROGRESS",
+                card -> card.get("businessStatus").asString().equals("IN_PROGRESS"), RESULT_TIMEOUT);
+        String operationA = inProgress.get("operationId").asString();
+        carrier.faultsOff();
+
+        String b = create(uniqueCargo("after malformed"));
+        JsonNode cardB = Awaits.finalCard(operator, b, RESULT_TIMEOUT);
+        assertThat(cardB.get("businessStatus").asString()).isEqualTo("SUCCEEDED");
+
+        // B's result comes later in the feed than A's broken one, so A's has been handled by now.
+        JsonNode cardA = operator.get("/api/requests/" + a).body();
+        assertThat(cardA.get("businessStatus").asString()).isEqualTo("IN_PROGRESS");
+        assertThat(cardA.get("result").isNull()).isTrue();
+        JsonNode operation = carrier.adminOperation(operationA);
+        assertThat(operation.get("result").get("status").asString())
+                .as("the carrier has the real result; dispatch refused the broken copy").isEqualTo("SUCCEEDED");
     }
 
     /**

@@ -6,6 +6,7 @@ import java.util.UUID;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 
+import com.acme.carrier.fault.MalformedResults;
 import com.acme.carrier.operation.ResultStatus;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -13,14 +14,19 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Result feed: {@code GET /results?after=N} returns entries with {@code feedSeq > N} in ascending order. */
+/**
+ * Result feed: {@code GET /results?after=N} returns entries with {@code feedSeq > N} in ascending order. The fault
+ * mode {@code malformed} may spoil the response ({@link MalformedResults}).
+ */
 @RestController
 public class FeedController {
 
     private final JdbcClient jdbc;
+    private final MalformedResults malformed;
 
-    public FeedController(JdbcClient jdbc) {
+    public FeedController(JdbcClient jdbc, MalformedResults malformed) {
         this.jdbc = jdbc;
+        this.malformed = malformed;
     }
 
     @GetMapping("/results")
@@ -47,7 +53,7 @@ public class FeedController {
                         rs.getString("reason"),
                         rs.getTimestamp("occurred_at").toInstant()))
                 .list();
-        return new Page(items);
+        return new Page(malformed.apply(items));
     }
 
     record Page(List<ResultEntry> items) {

@@ -6,13 +6,15 @@ import java.time.format.DateTimeParseException;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import tools.jackson.databind.JsonNode;
 
 /**
  * A result entry from the carrier ({@code ResultEntry} / {@code OperationResult} in carrier-api.yaml), parsed from
- * raw JSON. Parsing never throws: a malformed entry yields {@code invalidReason} so it can be recorded for review
- * instead of blocking the feed.
+ * raw JSON and checked strictly against the contract ({@code docs/specs/feed-bad-records.md} §6). Parsing never
+ * throws, whatever the input: a malformed entry yields {@code invalidReason}, with values from the entry escaped and
+ * shortened. Numbers are checked against their range before they are converted.
  */
 public record ResultMessage(
         JsonNode raw,
@@ -28,31 +30,49 @@ public record ResultMessage(
         String invalidReason) {
 
     static final Set<String> STATUSES = Set.of("IN_PROGRESS", "SUCCEEDED", "REJECTED");
+    static final BigDecimal MAX_PRICE = new BigDecimal("9999999999.99");
+    static final int MAX_REASON_LENGTH = 1000;
+    /** Longest value from the entry quoted in {@link #invalidReason}. */
+    static final int QUOTED_LENGTH = 200;
+
+    private static final Pattern UUID_TEXT =
+            Pattern.compile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
+    private static final Pattern TRACKING_NUMBER = Pattern.compile("^TRK-[0-9A-F]{8}$");
 
     public static ResultMessage parse(JsonNode raw) {
-        Long feedSeq = raw.path("feedSeq").isIntegralNumber() ? raw.get("feedSeq").asLong() : null;
+        Long feedSeq = longValue(raw.path("feedSeq"));
         String messageId = text(raw, "messageId");
         UUID operationId = uuid(text(raw, "operationId"));
-        Integer sequence = raw.path("sequence").isIntegralNumber() ? raw.get("sequence").asInt() : null;
+        Integer sequence = intValue(raw.path("sequence"));
         String status = text(raw, "status");
         String trackingNumber = text(raw, "trackingNumber");
-        BigDecimal price = raw.path("price").isNumber() ? raw.get("price").decimalValue() : null;
+        BigDecimal price = decimal(raw.path("price"));
         String reason = text(raw, "reason");
         Instant occurredAt = instant(text(raw, "occurredAt"));
 
         String invalid = null;
-        if (messageId == null || messageId.isBlank()) {
-            invalid = "messageId is missing";
+        if (messageId == null || !UUID_TEXT.matcher(messageId).matches()) {
+            invalid = "messageId is missing or not a UUID";
         } else if (operationId == null) {
             invalid = "operationId is missing or not a UUID";
         } else if (sequence == null || sequence < 1) {
-            invalid = "sequence is missing or not a positive integer";
+            invalid = "sequence is missing or not an integer in 1.." + Integer.MAX_VALUE;
         } else if (status == null || !STATUSES.contains(status)) {
-            invalid = "status is missing or unknown: " + status;
+            invalid = "status is missing or unknown: " + quote(status);
         } else if (occurredAt == null) {
             invalid = "occurredAt is missing or not an ISO instant";
-        } else if (status.equals("SUCCEEDED") && (trackingNumber == null || price == null || price.signum() < 0)) {
-            invalid = "SUCCEEDED needs trackingNumber and a non-negative price";
+        } else if (trackingNumber != null && !TRACKING_NUMBER.matcher(trackingNumber).matches()) {
+            invalid = "trackingNumber does not match TRK-XXXXXXXX: " + quote(trackingNumber);
+        } else if (price != null && !validPrice(price)) {
+            invalid = "price is not a number in 0.." + MAX_PRICE.toPlainString() + " with at most 2 decimals: "
+                    + quote(price.toPlainString());
+        } else if (!raw.path("price").isMissingNode() && !raw.path("price").isNull() && price == null) {
+            invalid = "price is not a number in 0.." + MAX_PRICE.toPlainString() + ": " + quote(raw.path("price").toString());
+        } else if (reason != null && !validReason(reason)) {
+            invalid = "reason is longer than " + MAX_REASON_LENGTH + " characters or has control characters: "
+                    + quote(reason);
+        } else if (status.equals("SUCCEEDED") && (trackingNumber == null || price == null)) {
+            invalid = "SUCCEEDED needs trackingNumber and price";
         } else if (status.equals("REJECTED") && (reason == null || reason.isBlank())) {
             invalid = "REJECTED needs a reason";
         }
@@ -74,20 +94,48 @@ public record ResultMessage(
                 + (price == null ? "" : price.stripTrailingZeros().toPlainString()) + "|" + Objects.toString(reason, "");
     }
 
+    private static boolean validPrice(BigDecimal price) {
+        return price.signum() >= 0 && price.compareTo(MAX_PRICE) <= 0 && price.stripTrailingZeros().scale() <= 2;
+    }
+
+    private static boolean validReason(String reason) {
+        return reason.length() <= MAX_REASON_LENGTH && SafeText.isPrintable(reason);
+    }
+
+    private static String quote(String value) {
+        return SafeText.of(value, QUOTED_LENGTH);
+    }
+
     private static String text(JsonNode node, String field) {
         JsonNode value = node.path(field);
         return value.isString() ? value.asString() : null;
     }
 
+    private static Long longValue(JsonNode value) {
+        return value.isIntegralNumber() && value.canConvertToLong() ? value.asLong() : null;
+    }
+
+    private static Integer intValue(JsonNode value) {
+        return value.isIntegralNumber() && value.canConvertToInt() ? value.asInt() : null;
+    }
+
+    /** A finite number as a decimal; {@code null} for anything else (a string, an infinite double, …). */
+    private static BigDecimal decimal(JsonNode value) {
+        if (!value.isNumber()) {
+            return null;
+        }
+        if (value.isDouble() || value.isFloat()) {
+            double number = value.asDouble();
+            return Double.isFinite(number) ? BigDecimal.valueOf(number) : null;
+        }
+        return value.decimalValue();
+    }
+
     private static UUID uuid(String value) {
-        if (value == null) {
+        if (value == null || !UUID_TEXT.matcher(value).matches()) {
             return null;
         }
-        try {
-            return UUID.fromString(value);
-        } catch (IllegalArgumentException e) {
-            return null;
-        }
+        return UUID.fromString(value);
     }
 
     private static Instant instant(String value) {

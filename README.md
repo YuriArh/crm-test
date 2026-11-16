@@ -139,11 +139,12 @@ curl -s "localhost:8081/results?after=0"
 make fault-lose-response   # создать заявку → итог по ленте, подтверждение через RESULT, повтора нет
 make carrier-ops           # одна операция, receivedCount = 1, state = EXECUTED
 curl -X PUT localhost:8081/admin/faults -H 'Content-Type: application/json' \
-  -d '{"unavailable":false,"loseResponse":true,"duplicate":false,"delayed":true}'
+  -d '{"unavailable":false,"loseResponse":true,"duplicate":false,"delayed":true,"malformed":false}'
                            # создать заявку → UNKNOWN, повтор, ACKNOWLEDGED через RESPONSE, итог через ~15 с
 make carrier-ops           # одна операция, receivedCount = 2, state = EXECUTED
 make fault-duplicate       # создать заявку → итог один, в ленте по две записи на сообщение
 make fault-delayed         # создать заявку → итог через ~15 с, запоздавший IN_PROGRESS игнорируется
+make fault-malformed       # создать заявку → «В работе», испорченный итог отсеян; после make fault-off новые заявки проходят
 make fault-unavailable     # создать заявку → RETRY_WAIT; затем make fault-off → итог
 make fault-off
 make faults                # текущие выключатели

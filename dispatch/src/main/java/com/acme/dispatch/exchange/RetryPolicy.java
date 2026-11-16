@@ -4,9 +4,9 @@ import java.time.Duration;
 import java.util.function.DoubleSupplier;
 
 /**
- * Pause before the next send attempt: {@code initial × 2^(attempt−1)}, capped at {@code max}, with ±20 % jitter
- * so that operations failed together do not retry together. After {@code maxAttempts} attempts there is no
- * next attempt.
+ * Pause before the next attempt: {@code initial × 2^(attempt−1)}, capped at {@code max}, optionally with a random
+ * spread. After {@code maxAttempts} attempts there is no next attempt. Used for sending to the carrier and for
+ * processing received results.
  */
 public final class RetryPolicy {
 
@@ -15,18 +15,31 @@ public final class RetryPolicy {
     private final Duration initial;
     private final Duration max;
     private final int maxAttempts;
+    private final double jitter;
     private final DoubleSupplier random;
 
-    public RetryPolicy(Duration initial, Duration max, int maxAttempts, DoubleSupplier random) {
+    /**
+     * @param jitter share of random spread around the pause, e.g. {@code 0.2} for ±20 %; {@code 0} for none
+     * @param random source of values in {@code [0, 1)} for the spread
+     */
+    public RetryPolicy(Duration initial, Duration max, int maxAttempts, double jitter, DoubleSupplier random) {
         this.initial = initial;
         this.max = max;
         this.maxAttempts = maxAttempts;
+        this.jitter = jitter;
         this.random = random;
     }
 
-    public static RetryPolicy from(ExchangeProperties properties) {
+    /** Sends to the carrier: ±20 % spread, so that operations failed together do not retry together. */
+    public static RetryPolicy forSending(ExchangeProperties properties) {
         return new RetryPolicy(properties.initialBackoff(), properties.maxBackoff(), properties.maxAttempts(),
-                Math::random);
+                JITTER, Math::random);
+    }
+
+    /** Processing of received results: no spread, nothing goes to the carrier. */
+    public static RetryPolicy forInboxProcessing(ExchangeProperties properties) {
+        return new RetryPolicy(properties.inboxInitialBackoff(), properties.inboxMaxBackoff(),
+                properties.inboxMaxAttempts(), 0, () -> 0.5);
     }
 
     /** Whether another attempt is allowed after {@code attemptsMade} attempts. */
@@ -38,7 +51,7 @@ public final class RetryPolicy {
     public Duration backoff(int attemptsMade) {
         int exponent = Math.min(Math.max(attemptsMade - 1, 0), 30);
         long baseMillis = Math.min(initial.toMillis() * (1L << exponent), max.toMillis());
-        double factor = 1 - JITTER + 2 * JITTER * random.getAsDouble();
+        double factor = 1 - jitter + 2 * jitter * random.getAsDouble();
         return Duration.ofMillis(Math.round(baseMillis * factor));
     }
 }

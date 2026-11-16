@@ -8,8 +8,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 /**
  * Background exchange with the carrier ({@code docs/dispatch-design.md} §5).
  *
- * @param enabled          whether the send and feed workers run on their schedule (off in integration tests,
- *                         which call them directly)
+ * @param enabled          whether the send and feed workers run on their schedule ({@code EXCHANGE_ENABLED}); off
+ *                         stops the exchange with the carrier, e.g. while the carrier is under maintenance, and
+ *                         leaves the requests API working
  * @param sendsPerPass     most operations sent in one pass; each is claimed right before it is sent
  * @param lease            how long a claimed operation stays in {@code SENDING}; after that it is treated as
  *                         interrupted and goes to {@code UNKNOWN}; it is also the lifetime of an open send
@@ -18,7 +19,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param maxBackoff       upper bound of the pause
  * @param maxAttempts      attempts before the operation becomes {@code FAILED}
  * @param feedPageSize     entries read from the result feed per request (the carrier allows at most 100)
- * @param feedMaxBackoff   longest pause between feed reads while the carrier is unavailable
+ * @param feedMaxBackoff   longest pause between feed reads while the carrier is unavailable or its feed is broken
+ * @param inboxMaxAttempts      attempts to process a received result before it becomes {@code FAILED}
+ * @param inboxInitialBackoff   pause before the second processing attempt; doubles with every attempt
+ * @param inboxMaxBackoff       upper bound of that pause
  */
 @ConfigurationProperties(prefix = "app.exchange")
 public record ExchangeProperties(
@@ -29,5 +33,8 @@ public record ExchangeProperties(
         @DefaultValue("5m") Duration maxBackoff,
         @DefaultValue("8") int maxAttempts,
         @DefaultValue("100") int feedPageSize,
-        @DefaultValue("30s") Duration feedMaxBackoff) {
+        @DefaultValue("30s") Duration feedMaxBackoff,
+        @DefaultValue("5") int inboxMaxAttempts,
+        @DefaultValue("1s") Duration inboxInitialBackoff,
+        @DefaultValue("1m") Duration inboxMaxBackoff) {
 }

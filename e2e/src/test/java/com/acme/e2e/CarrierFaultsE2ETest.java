@@ -141,6 +141,28 @@ class CarrierFaultsE2ETest {
         assertThat(carrier.adminOperation(id).get("resultPublishAt").isNull()).isTrue();
     }
 
+    @Test
+    void malformedBreaksThePriceInTheFeedResponseOnly() {
+        long cursor = carrier.feedEnd();
+        Map<String, Object> body = CarrierClient.operationBody(uniqueCargo("malformed"));
+        String id = (String) body.get("operationId");
+        assertThat(carrier.post("/operations", body).status()).isEqualTo(202);
+        List<JsonNode> entries = Awaits.until("both entries of " + id + " published",
+                () -> carrier.feedEntries(cursor, id), list -> list.size() >= 2, Awaits.TIMEOUT);
+        JsonNode realPrice = entries.get(1).get("price");
+
+        carrier.setFaults(Faults.MALFORMED);
+        List<JsonNode> broken = carrier.feedEntries(cursor, id);
+        assertThat(broken.get(0).get("price").isNull()).as("IN_PROGRESS is not changed").isTrue();
+        assertThat(broken.get(1).get("status").asString()).isEqualTo("SUCCEEDED");
+        assertThat(broken.get(1).get("price").decimalValue()).isEqualByComparingTo("10000000000000.00");
+        // Only the feed response is spoiled: the operation shows the real result.
+        assertThat(carrier.adminOperation(id).get("result").get("price")).isEqualTo(realPrice);
+
+        carrier.faultsOff();
+        assertThat(carrier.feedEntries(cursor, id).get(1).get("price")).isEqualTo(realPrice);
+    }
+
     /** {@code IN_PROGRESS} twice, then the final entry twice: same messageId and content, adjacent feedSeq. */
     static void assertDuplicatedPairs(List<JsonNode> entries) {
         assertThat(entries).hasSize(4);
