@@ -3,6 +3,7 @@ package com.acme.dispatch.exchange.feed;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import com.acme.dispatch.carrier.CarrierClient;
 import com.acme.dispatch.carrier.CarrierUnavailableException;
@@ -23,7 +24,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  * Pulls results from the carrier's feed ({@code docs/dispatch-design.md} §5). The page is read outside any
  * transaction; then, in one transaction, the cursor row is locked, every entry goes to {@link ResultInbox} and
  * the cursor moves past the page. A restart therefore neither loses nor re-applies a page. A full page is followed
- * by the next one at once. While the carrier is unavailable the pause grows 1 → 2 → … → 30 s.
+ * by the next one at once. A page whose envelope ({@link FeedEnvelope}) is broken is not received at all. While the
+ * carrier is unavailable or its feed is broken, the pause grows 1 → 2 → … → 30 s.
  */
 @Component
 public class FeedPoller {
@@ -70,13 +72,24 @@ public class FeedPoller {
             try {
                 page = carrier.results(after, properties.feedPageSize());
             } catch (CarrierUnavailableException e) {
-                pause(e);
+                if (pause() == 1) {
+                    log.warn("Carrier result feed is unavailable: {}", e.getMessage());
+                }
+                return handled;
+            }
+            if (page.isEmpty()) {
+                resume();
+                return handled;
+            }
+            Optional<String> violation = FeedEnvelope.violation(after, page);
+            if (violation.isPresent()) {
+                // Without positions there is no place to continue from; skipping could lose results.
+                pause();
+                log.error("Feed protocol violated in the page after {}: {}; nothing is received, retrying after a pause",
+                        after, violation.get());
                 return handled;
             }
             resume();
-            if (page.isEmpty()) {
-                return handled;
-            }
             Integer processed = transaction.execute(status -> process(after, page));
             if (processed == null || processed == 0) {
                 return handled;
@@ -93,40 +106,25 @@ public class FeedPoller {
             // Another instance handled this page meanwhile; read again on the next pass.
             return 0;
         }
-        long last = after;
         for (JsonNode entry : page) {
             inbox.accept(entry, InboxSource.FEED);
-            if (entry.path("feedSeq").isIntegralNumber()) {
-                last = Math.max(last, entry.get("feedSeq").asLong());
-            }
         }
-        if (last == after) {
-            log.error("Feed page after {} has no readable feedSeq; the cursor cannot move", after);
-            return 0;
-        }
-        cursor.move(last, calendar.now());
+        cursor.move(FeedEnvelope.lastFeedSeq(page), calendar.now());
         return page.size();
     }
 
-    private void pause(CarrierUnavailableException e) {
+    /** Starts or extends the pause after a failed read; returns the number of failed reads in a row. */
+    private int pause() {
         failuresInARow++;
         long seconds = Math.min(BASE_PAUSE.toSeconds() << Math.min(failuresInARow - 1, 10),
                 properties.feedMaxBackoff().toSeconds());
         pausedUntil = calendar.now().plusSeconds(seconds);
-        if (failuresInARow == 1) {
-            log.warn("Carrier result feed is unavailable: {}", e.getMessage());
-        }
-    }
-
-    /** Forgets the unavailability pause (tests share one poller across cases). */
-    synchronized void resetPause() {
-        failuresInARow = 0;
-        pausedUntil = Instant.MIN;
+        return failuresInARow;
     }
 
     private void resume() {
         if (failuresInARow > 0) {
-            log.info("Carrier result feed is available again after {} failed read(s)", failuresInARow);
+            log.info("Carrier result feed is readable again after {} failed read(s)", failuresInARow);
         }
         failuresInARow = 0;
         pausedUntil = Instant.MIN;

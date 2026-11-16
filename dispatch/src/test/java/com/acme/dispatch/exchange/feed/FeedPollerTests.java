@@ -45,7 +45,6 @@ class FeedPollerTests {
     void setUp() {
         clock.set(START);
         carrier.reset();
-        poller.resetPause();
         cursor.move(0, START);
     }
 
@@ -139,6 +138,39 @@ class FeedPollerTests {
     }
 
     @Test
+    void pageWithoutAPositionIsRejectedWholeAndNothingIsStored() {
+        RequestCard request = requests.create("1");
+        carrier.publish(inProgress(1, request.operationId()), raw("{\"status\": \"SUCCEEDED\"}"));
+
+        assertThat(poller.runOnce()).isZero();
+        assertThat(poller.runOnce()).as("pausing, the feed is not read again").isZero();
+
+        assertThat(cursor.read()).isZero();
+        assertThat(inboxRows()).isZero();
+        assertThat(status(request)).as("the valid record of the page is not applied either").isEqualTo("AWAITING");
+
+        // The carrier fixes its feed; after the pause the page is read again.
+        carrier.reset();
+        carrier.publish(inProgress(1, request.operationId()));
+        clock.advance(Duration.ofSeconds(1));
+        assertThat(poller.runOnce()).isEqualTo(1);
+        assertThat(cursor.read()).isEqualTo(1);
+    }
+
+    @Test
+    void pageWithDecreasingPositionsIsRejected() {
+        carrier.publish(inProgress(5, UUID.randomUUID()), inProgress(4, UUID.randomUUID()));
+
+        assertThat(poller.runOnce()).isZero();
+        assertThat(cursor.read()).isZero();
+        assertThat(inboxRows()).isZero();
+
+        carrier.reset();
+        clock.advance(Duration.ofSeconds(1));
+        assertThat(poller.runOnce()).as("an empty feed ends the pause").isZero();
+    }
+
+    @Test
     void pauseGrowsWhileTheCarrierStaysUnavailable() {
         carrier.feedUnavailable(true);
         poller.runOnce();                                     // pause 1 s
@@ -151,6 +183,10 @@ class FeedPollerTests {
         assertThat(poller.runOnce()).as("1 s into a 2 s pause").isZero();
         clock.advance(Duration.ofSeconds(1));
         assertThat(poller.runOnce()).isEqualTo(1);
+    }
+
+    private int inboxRows() {
+        return jdbc.sql("SELECT count(*) FROM inbox").query(Integer.class).single();
     }
 
     private String status(RequestCard request) {
