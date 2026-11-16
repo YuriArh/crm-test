@@ -1,10 +1,12 @@
 package com.acme.dispatch.problem;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.acme.dispatch.config.IdGenerator;
 import com.acme.dispatch.exchange.DeliveryStatus;
+import com.acme.dispatch.exchange.inbox.InboxDao.Decision;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,6 +52,23 @@ public class ProblemService {
                 log.info("Closed {} delivery problem(s) of request {} (operation {}): delivery {}", closed, requestId,
                         operationId, status);
             }
+        }
+    }
+
+    /**
+     * A received record was decided. Opens its problem if the outcome needs an operator.
+     *
+     * @param requestId its request, or {@code null} if the record names no known operation
+     * @param reason    why: the record's {@code reason}
+     */
+    public void onRecordOutcome(UUID inboxId, UUID requestId, Decision outcome, String reason, Instant now) {
+        Optional<ProblemKind> kind = ProblemRules.forRecord(outcome);
+        if (kind.isEmpty()) {
+            return;
+        }
+        String details = reason == null || reason.isBlank() ? "Record is " + outcome : reason;
+        if (problems.open(ids.newId(), kind.get(), requestId, inboxId, details, now)) {
+            log.warn("Problem {} opened for record {} of request {}: {}", kind.get(), inboxId, requestId, details);
         }
     }
 
