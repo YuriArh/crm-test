@@ -174,6 +174,33 @@ export interface paths {
         patch: operations["updateRequest"];
         trace?: never;
     };
+    "/api/requests/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Request id. A malformed id answers `404`, like a missing request. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry the delivery
+         * @description Operators of the request's service only. Allowed while the delivery is `FAILED` or `UNKNOWN`
+         *     (`actions` of the card has `RETRY`). Starts a new budget of retries and sends at once, with the same
+         *     `operationId`: the carrier never executes one operation twice. `FAILED` becomes `PENDING`; `UNKNOWN`
+         *     stays `UNKNOWN` until the carrier confirms receipt. An open `DELIVERY_FAILED` problem is closed as
+         *     `RETRIED`.
+         */
+        post: operations["retryDelivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/problems": {
         parameters: {
             query?: never;
@@ -808,6 +835,64 @@ export interface operations {
                 };
             };
             /** @description `INVALID_ASSIGNEE`: the assignee is not an enabled operator of the same service. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    retryDelivery: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Client-generated key of this action, at most 100 characters. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Request id. A malformed id answers `404`, like a missing request. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The card after the retry, or the replay of an earlier retry with the same key. */
+            200: {
+                headers: {
+                    /** @description `true` when this response was replayed for a repeated `Idempotency-Key`. */
+                    "Idempotent-Replayed"?: "true" | "false";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestCard"];
+                };
+            };
+            /** @description No `Idempotency-Key` header (`IDEMPOTENCY_KEY_REQUIRED`) or a too long one. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `INVALID_STATE`: the delivery is neither `FAILED` nor `UNKNOWN` now. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The `Idempotency-Key` was already used for another action or request. */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -115,6 +115,23 @@ public class SendQueueDao {
                 .optional();
     }
 
+    /**
+     * An operator retries the delivery: a new budget of retries starting from the attempts made so far, due now.
+     * {@code FAILED} becomes {@code PENDING}; {@code UNKNOWN} stays {@code UNKNOWN} (the carrier may have it).
+     * Conditional on the status, so it does nothing to an operation that moved on. Returns whether it retried.
+     */
+    public boolean retryByOperator(UUID requestId, Instant now) {
+        return jdbc.sql("""
+                        UPDATE dispatch_operation
+                           SET delivery_status = CASE delivery_status WHEN 'FAILED' THEN 'PENDING'
+                                                     ELSE delivery_status END,
+                               retry_from = attempts, next_attempt_at = :now, last_error = NULL, updated_at = :now
+                         WHERE request_id = :requestId AND delivery_status IN ('FAILED', 'UNKNOWN')""")
+                .param("now", toSql(now))
+                .param("requestId", requestId)
+                .update() == 1;
+    }
+
     /** The carrier confirmed receipt. */
     boolean acknowledge(Claimed claimed, Instant now) {
         return jdbc.sql("""

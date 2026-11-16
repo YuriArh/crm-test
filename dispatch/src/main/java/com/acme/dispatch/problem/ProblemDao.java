@@ -37,6 +37,22 @@ public class ProblemDao {
                 .update() == 1;
     }
 
+    /** Closes the request's open problem of this kind with an operator's decision. Returns whether it did. */
+    public boolean closeByOperator(UUID requestId, ProblemKind kind, ProblemDecision decision, UUID operatorId,
+                                   String comment, Instant now) {
+        return jdbc.sql("""
+                        UPDATE problem SET status = 'RESOLVED', resolved_at = :now, resolved_by = :operatorId,
+                                           decision = :decision, comment = :comment
+                         WHERE request_id = :requestId AND kind = :kind AND status = 'OPEN'""")
+                .param("now", toSql(now))
+                .param("operatorId", operatorId)
+                .param("decision", decision.name())
+                .param("comment", comment)
+                .param("requestId", requestId)
+                .param("kind", kind.name())
+                .update() == 1;
+    }
+
     /** Closes the request's open problems of these kinds as the system did. Returns how many it closed. */
     public int closeBySystem(UUID requestId, Collection<ProblemKind> kinds, Instant now) {
         return jdbc.sql("""

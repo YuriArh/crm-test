@@ -483,6 +483,82 @@ paths:
                     instance: /api/requests/0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60
                     code: INVALID_ASSIGNEE
 
+  /api/requests/{id}/retry:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id. A malformed id answers `404`, like a missing request.
+        schema:
+          type: string
+    post:
+      tags: [problems]
+      operationId: retryDelivery
+      summary: Retry the delivery
+      security:
+        - session: []
+          csrf: []
+      description: |
+        Operators of the request's service only. Allowed while the delivery is `FAILED` or `UNKNOWN`
+        (`actions` of the card has `RETRY`). Starts a new budget of retries and sends at once, with the same
+        `operationId`: the carrier never executes one operation twice. `FAILED` becomes `PENDING`; `UNKNOWN`
+        stays `UNKNOWN` until the carrier confirms receipt. An open `DELIVERY_FAILED` problem is closed as
+        `RETRIED`.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Client-generated key of this action, at most 100 characters.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+      responses:
+        '200':
+          description: The card after the retry, or the replay of an earlier retry with the same key.
+          headers:
+            Idempotent-Replayed:
+              description: '`true` when this response was replayed for a repeated `Idempotency-Key`.'
+              schema:
+                type: string
+                enum: ['true', 'false']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestCard'
+        '400':
+          description: No `Idempotency-Key` header (`IDEMPOTENCY_KEY_REQUIRED`) or a too long one.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`INVALID_STATE`: the delivery is neither `FAILED` nor `UNKNOWN` now.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                invalidState:
+                  value:
+                    title: Action is not allowed in the current state
+                    status: 409
+                    detail: Delivery of request DR-000123 is ACKNOWLEDGED; only FAILED or UNKNOWN can be retried
+                    instance: /api/requests/0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60/retry
+                    code: INVALID_STATE
+        '422':
+          description: The `Idempotency-Key` was already used for another action or request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
   /api/problems:
     get:
       tags: [problems]
