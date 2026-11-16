@@ -8,8 +8,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 /**
  * Background exchange with the carrier ({@code docs/dispatch-design.md} §5).
  *
- * @param enabled          whether the send and feed workers run on their schedule (off in integration tests,
- *                         which call them directly)
+ * @param enabled          whether the send and feed workers run on their schedule ({@code EXCHANGE_ENABLED}); off
+ *                         stops the exchange with the carrier, e.g. while the carrier is under maintenance, and
+ *                         leaves the requests API working
  * @param sendsPerPass     most operations sent in one pass; each is claimed right before it is sent
  * @param lease            how long a claimed operation stays in {@code SENDING}; after that it is treated as
  *                         interrupted and goes to {@code UNKNOWN}; it is also the lifetime of an open send

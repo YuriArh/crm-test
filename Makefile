@@ -2,7 +2,7 @@
 -include .env
 export
 
-.PHONY: help up down reset logs logs-carrier ps db build test run wait e2e seed contracts-lint carrier-ops \
+.PHONY: help up down reset logs logs-carrier ps db build test run wait e2e seed contracts-lint carrier-ops inbox \
         faults fault-unavailable fault-lose-response fault-duplicate fault-delayed fault-malformed fault-off \
         dispatch-kill dispatch-start db-kill db-start \
         web-install web-dev web-build web-test web-e2e web-api-types web-api-check
@@ -75,6 +75,12 @@ db-start: ## Start PostgreSQL after db-kill and wait until dispatch and carrier-
 
 seed: wait ## Create demo requests through the API (safe to re-run; start the stack with make up)
 	./scripts/seed.sh $(E2E_BASE_URL)
+
+inbox: ## Show the newest 30 carrier results received by dispatch: status, reason, processing attempts
+	@docker compose exec -T postgres psql -U $(or $(DB_USER),dispatch) -d $(or $(DB_NAME),dispatch) -c \
+	  "select to_char(received_at, 'HH24:MI:SS') as received, feed_seq, processing_status as status, attempts, \
+	          left(reason, 90) as reason, left(last_error, 50) as last_error, message_id, operation_id \
+	     from inbox order by received_at desc, feed_seq desc nulls last limit 30"
 
 carrier-ops: ## Show carrier-emulator operations with execution counters (newest 100)
 	@curl -sf $(CARRIER_BASE_URL)/admin/operations || echo "carrier-emulator is not reachable at $(CARRIER_BASE_URL)"
