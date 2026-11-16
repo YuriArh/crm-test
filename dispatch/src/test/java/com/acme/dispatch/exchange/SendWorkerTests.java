@@ -34,10 +34,15 @@ import com.acme.dispatch.support.TestRows;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @IntegrationTest
+@ExtendWith(OutputCaptureExtension.class)
 class SendWorkerTests {
 
     static final SubmitResult TEMPORARY = new SubmitResult(SubmitOutcome.TEMPORARY_ERROR, 503, "HTTP 503");
@@ -66,6 +71,10 @@ class SendWorkerTests {
     ExchangeProperties properties;
     @Autowired
     TestResults results;
+    @Autowired
+    SendQueueDao queue;
+    @Autowired
+    TransactionTemplate transaction;
 
     @BeforeEach
     void setUp() {
@@ -224,23 +233,18 @@ class SendWorkerTests {
     }
 
     @Test
-    void sendInterruptedByACrashIsRecoveredAsUnknownAndResent() {
+    void sendInterruptedByACrashIsResentAfterThePause() {
         RequestCard request = requests.create("1");
-        // A worker claimed it a minute ago and died before recording the outcome.
-        jdbc.sql("""
-                        UPDATE dispatch_operation SET delivery_status = 'SENDING', attempts = 1,
-                               locked_until = :expired WHERE request_id = :id""")
-                .param("expired", toSql(START.minusSeconds(1)))
-                .param("id", request.id())
-                .update();
-        jdbc.sql("""
-                        INSERT INTO exchange_attempt (id, operation_id, attempt_no, started_at)
-                        VALUES (:id, :operationId, 1, :started)""")
-                .param("id", UUID.randomUUID())
-                .param("operationId", request.operationId())
-                .param("started", toSql(START.minusSeconds(61)))
-                .update();
+        crashedMidSend(request, 1);
 
+        assertThat(worker.runOnce()).as("recovered, waits for its pause").isZero();
+        DispatchOperation recovered = operation(request);
+        assertThat(recovered.deliveryStatus()).isEqualTo(DeliveryStatus.UNKNOWN);
+        assertThat(recovered.lastError()).isEqualTo(INTERRUPTED);
+        assertThat(recovered.lockedUntil()).isNull();
+        assertThat(carrier.submitted()).isEmpty();
+
+        clock.set(START.plusSeconds(7));
         assertThat(worker.runOnce()).isEqualTo(1);
 
         DispatchOperation operation = operation(request);
@@ -248,6 +252,100 @@ class SendWorkerTests {
         assertThat(operation.attempts()).isEqualTo(2);
         assertThat(attempts(request)).containsExactly("1:UNKNOWN:null:finished", "2:ACKNOWLEDGED:202:finished");
         assertThat(attemptError(request, 1)).isEqualTo(INTERRUPTED);
+    }
+
+    @Test
+    void crashOnTheLastAttemptFailsTheOperation() {
+        int max = properties.maxAttempts();
+        RequestCard request = requests.create("1");
+        crashedMidSend(request, max);
+
+        assertThat(worker.runOnce()).isZero();
+
+        DispatchOperation operation = operation(request);
+        assertThat(operation.deliveryStatus()).isEqualTo(DeliveryStatus.FAILED);
+        assertThat(operation.attempts()).isEqualTo(max);
+        assertThat(operation.lastError()).isEqualTo("Attempts exhausted (" + max + "): " + INTERRUPTED);
+        assertThat(operation.lockedUntil()).isNull();
+        assertThat(carrier.submitted()).isEmpty();
+        assertThat(attempts(request)).containsExactly(max + ":UNKNOWN:null:finished");
+
+        clock.set(START.plus(Duration.ofHours(1)));
+        assertThat(worker.runOnce()).as("an operator decides").isZero();
+        assertThat(carrier.submitted()).isEmpty();
+    }
+
+    @Test
+    void crashedSendWaitsForItsPauseBeforeTheNextAttempt() {
+        RequestCard request = requests.create("1");
+        crashedMidSend(request, 3);
+
+        assertThat(worker.runOnce()).isZero();
+        DispatchOperation recovered = operation(request);
+        assertThat(recovered.deliveryStatus()).isEqualTo(DeliveryStatus.UNKNOWN);
+        assertThat(recovered.attempts()).isEqualTo(3);
+        // The pause after attempt 3: 5 s × 2² = 20 s, ±20 %.
+        assertThat(Duration.between(START, recovered.nextAttemptAt()))
+                .isBetween(Duration.ofSeconds(16), Duration.ofSeconds(24));
+
+        clock.set(START.plusSeconds(15));
+        assertThat(worker.runOnce()).as("still within the pause").isZero();
+        assertThat(carrier.submitted()).isEmpty();
+
+        clock.set(START.plusSeconds(25));
+        assertThat(worker.runOnce()).isEqualTo(1);
+        DispatchOperation operation = operation(request);
+        assertThat(operation.deliveryStatus()).isEqualTo(DeliveryStatus.ACKNOWLEDGED);
+        assertThat(operation.attempts()).isEqualTo(4);
+    }
+
+    @Test
+    void recoveryLogsRescheduledAndFailedOperations(CapturedOutput output) {
+        RequestCard early = requests.create("1");
+        RequestCard last = requests.create("2");
+        crashedMidSend(early, 1);
+        crashedMidSend(last, properties.maxAttempts());
+
+        worker.runOnce();
+
+        assertThat(output.getOut())
+                .contains("Rescheduled 1 operation(s) after an interrupted send: [" + early.operationId() + "]")
+                .contains("Failed 1 operation(s) after an interrupted send, attempts exhausted: ["
+                        + last.operationId() + "]");
+    }
+
+    @Test
+    void recoveryDoesNotTouchAnOperationThatMovedOn() {
+        RequestCard confirmed = requests.create("1");
+        RequestCard reclaimed = requests.create("2");
+        crashedMidSend(confirmed, 1);
+        crashedMidSend(reclaimed, 1);
+        List<SendQueueDao.Expired> expired = transaction.execute(status -> queue.findExpired(START));
+        assertThat(expired).extracting(SendQueueDao.Expired::operationId)
+                .containsExactlyInAnyOrder(confirmed.operationId(), reclaimed.operationId());
+
+        // Meanwhile a result confirmed one delivery, and another instance recovered and claimed the other again.
+        jdbc.sql("""
+                        UPDATE dispatch_operation SET delivery_status = 'ACKNOWLEDGED', locked_until = NULL,
+                               acknowledged_at = :now, acknowledged_via = 'RESULT' WHERE request_id = :id""")
+                .param("now", toSql(START))
+                .param("id", confirmed.id())
+                .update();
+        jdbc.sql("""
+                        UPDATE dispatch_operation SET attempts = 2, locked_until = :expired WHERE request_id = :id""")
+                .param("expired", toSql(START.minusSeconds(1)))
+                .param("id", reclaimed.id())
+                .update();
+
+        for (SendQueueDao.Expired operation : expired) {
+            assertThat(queue.rescheduleInterrupted(operation, START.plusSeconds(5), INTERRUPTED, START)).isFalse();
+            assertThat(queue.failInterrupted(operation, INTERRUPTED, START)).isFalse();
+        }
+
+        assertThat(operation(confirmed).deliveryStatus()).isEqualTo(DeliveryStatus.ACKNOWLEDGED);
+        DispatchOperation stillSending = operation(reclaimed);
+        assertThat(stillSending.deliveryStatus()).isEqualTo(DeliveryStatus.SENDING);
+        assertThat(stillSending.attempts()).isEqualTo(2);
     }
 
     @Test
@@ -294,7 +392,9 @@ class SendWorkerTests {
         carrier.duringSubmit(() -> {
             if (first.getAndSet(false)) {
                 clock.set(START.plusSeconds(61));
-                assertThat(worker.runOnce()).as("the other instance resends").isEqualTo(1);
+                assertThat(worker.runOnce()).as("the other instance recovers it").isZero();
+                clock.set(START.plusSeconds(68));
+                assertThat(worker.runOnce()).as("and resends after the pause").isEqualTo(1);
             }
         });
 
@@ -420,6 +520,28 @@ class SendWorkerTests {
         assertThat(results.deliver(TestFeed.succeeded(1, request.operationId(), "TRK-00000001", "325.00")))
                 .isEqualTo("APPLIED");
         assertThat(operation(request).deliveryStatus()).isEqualTo(DeliveryStatus.ACKNOWLEDGED);
+    }
+
+    /**
+     * A worker claimed the operation as attempt {@code attempt} a minute before {@code START}, opened the attempt and
+     * died before recording the outcome: the lease ran out a second ago.
+     */
+    private void crashedMidSend(RequestCard request, int attempt) {
+        jdbc.sql("""
+                        UPDATE dispatch_operation SET delivery_status = 'SENDING', attempts = :attempt,
+                               locked_until = :expired WHERE request_id = :id""")
+                .param("attempt", attempt)
+                .param("expired", toSql(START.minusSeconds(1)))
+                .param("id", request.id())
+                .update();
+        jdbc.sql("""
+                        INSERT INTO exchange_attempt (id, operation_id, attempt_no, started_at)
+                        VALUES (:id, :operationId, :attempt, :started)""")
+                .param("id", UUID.randomUUID())
+                .param("operationId", request.operationId())
+                .param("attempt", attempt)
+                .param("started", toSql(START.minusSeconds(61)))
+                .update();
     }
 
     private String attemptError(RequestCard request, int attemptNo) {

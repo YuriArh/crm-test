@@ -28,21 +28,52 @@ public class SendQueueDao {
     }
 
     /**
-     * Operations left in {@code SENDING} past their lease (the worker died mid-send) become {@code UNKNOWN}
-     * and are due at once: the carrier may or may not have them, and a resend with the same operationId is safe.
-     *
-     * @return operationIds of the recovered operations
+     * Operations left in {@code SENDING} past their lease: the worker died mid-send. The caller decides each by the
+     * retry policy ({@link #rescheduleInterrupted}, {@link #failInterrupted}). Locked until the caller's transaction
+     * ends; rows another instance is recovering are skipped.
      */
-    List<UUID> recoverExpired(Instant now) {
+    List<Expired> findExpired(Instant now) {
+        return jdbc.sql("""
+                        SELECT request_id, operation_id, attempts FROM dispatch_operation
+                         WHERE delivery_status = 'SENDING' AND locked_until < :now
+                         ORDER BY locked_until
+                           FOR UPDATE SKIP LOCKED""")
+                .param("now", toSql(now))
+                .query((rs, row) -> new Expired(
+                        rs.getObject("request_id", UUID.class),
+                        rs.getObject("operation_id", UUID.class),
+                        rs.getInt("attempts")))
+                .list();
+    }
+
+    /** The interrupted attempt may be followed by another one: {@code UNKNOWN} until {@code next}. */
+    boolean rescheduleInterrupted(Expired expired, Instant next, String error, Instant now) {
         return jdbc.sql("""
                         UPDATE dispatch_operation
-                           SET delivery_status = 'UNKNOWN', locked_until = NULL, next_attempt_at = :now,
-                               last_error = 'Send was interrupted (lease expired)', updated_at = :now
-                         WHERE delivery_status = 'SENDING' AND locked_until < :now
-                        RETURNING operation_id""")
+                           SET delivery_status = 'UNKNOWN', locked_until = NULL, next_attempt_at = :next,
+                               last_error = :error, updated_at = :now
+                         WHERE request_id = :requestId AND delivery_status = 'SENDING' AND attempts = :attempt
+                           AND locked_until < :now""")
+                .param("next", toSql(next))
+                .param("error", error)
                 .param("now", toSql(now))
-                .query(UUID.class)
-                .list();
+                .param("requestId", expired.requestId())
+                .param("attempt", expired.attempt())
+                .update() == 1;
+    }
+
+    /** The interrupted attempt was the last one allowed: an operator decides. */
+    boolean failInterrupted(Expired expired, String error, Instant now) {
+        return jdbc.sql("""
+                        UPDATE dispatch_operation
+                           SET delivery_status = 'FAILED', locked_until = NULL, last_error = :error, updated_at = :now
+                         WHERE request_id = :requestId AND delivery_status = 'SENDING' AND attempts = :attempt
+                           AND locked_until < :now""")
+                .param("error", error)
+                .param("now", toSql(now))
+                .param("requestId", expired.requestId())
+                .param("attempt", expired.attempt())
+                .update() == 1;
     }
 
     /**
@@ -132,5 +163,13 @@ public class SendQueueDao {
      *                  and the base of its duration
      */
     record Claimed(UUID requestId, UUID operationId, int attempt, SubmitRequest request, Instant claimedAt) {
+    }
+
+    /**
+     * An operation whose send was interrupted.
+     *
+     * @param attempt number of the interrupted attempt, already counted when it was claimed; the fencing token
+     */
+    record Expired(UUID requestId, UUID operationId, int attempt) {
     }
 }
