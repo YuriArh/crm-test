@@ -91,6 +91,8 @@ public class SendWorker {
     /**
      * An operation left in {@code SENDING} past its lease is an attempt with an unknown outcome: the same retry
      * policy as for a timeout decides between a paused retry and {@code FAILED}; the attempt was counted at claim.
+     * The policy counts attempts within the current budget ({@code attempts - retry_from}): an operator's retry
+     * starts a new one without resetting the attempt number.
      */
     private void recover() {
         transaction.executeWithoutResult(status -> {
@@ -98,13 +100,14 @@ public class SendWorker {
             List<UUID> rescheduled = new ArrayList<>();
             List<UUID> failed = new ArrayList<>();
             for (SendQueueDao.Expired expired : queue.findExpired(now)) {
-                if (retryPolicy.canRetry(expired.attempt())) {
-                    Instant next = now.plus(retryPolicy.backoff(expired.attempt()));
+                int inBudget = expired.attemptInBudget();
+                if (retryPolicy.canRetry(inBudget)) {
+                    Instant next = now.plus(retryPolicy.backoff(inBudget));
                     if (queue.rescheduleInterrupted(expired, next, INTERRUPTED, now)) {
                         rescheduled.add(expired.operationId());
                     }
                 } else if (queue.failInterrupted(expired,
-                        "Attempts exhausted (" + expired.attempt() + "): " + INTERRUPTED, now)) {
+                        "Attempts exhausted (" + inBudget + "): " + INTERRUPTED, now)) {
                     failed.add(expired.operationId());
                 }
             }
@@ -175,10 +178,11 @@ public class SendWorker {
     }
 
     private boolean retryOrFail(SendQueueDao.Claimed claimed, DeliveryStatus status, SubmitResult result, Instant now) {
-        if (!retryPolicy.canRetry(claimed.attempt())) {
-            return queue.fail(claimed, "Attempts exhausted (" + claimed.attempt() + "): " + result.error(), now);
+        int inBudget = claimed.attemptInBudget();
+        if (!retryPolicy.canRetry(inBudget)) {
+            return queue.fail(claimed, "Attempts exhausted (" + inBudget + "): " + result.error(), now);
         }
-        Instant next = now.plus(retryPolicy.backoff(claimed.attempt()));
+        Instant next = now.plus(retryPolicy.backoff(inBudget));
         return queue.scheduleRetry(claimed, status, next, result.error(), now);
     }
 }

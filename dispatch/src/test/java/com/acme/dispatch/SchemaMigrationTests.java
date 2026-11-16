@@ -42,7 +42,39 @@ class SchemaMigrationTests {
     @Test
     void allMigrationsAreApplied() {
         assertThat(Arrays.stream(flyway.info().applied()).map(MigrationInfo::getVersion).map(Object::toString))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10");
+    }
+
+    @Test
+    void retryFromCannotExceedAttempts() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+        insertOperation(request, UUID.randomUUID());
+
+        assertThatThrownBy(() -> jdbc.sql("UPDATE dispatch_operation SET attempts = 2, retry_from = 3").update())
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("dispatch_operation_retry_from_range");
+    }
+
+    @Test
+    void retryFromCannotBeNegative() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+        insertOperation(request, UUID.randomUUID());
+
+        assertThatThrownBy(() -> jdbc.sql("UPDATE dispatch_operation SET retry_from = -1").update())
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("dispatch_operation_retry_from_range");
+    }
+
+    @Test
+    void appliedRecordMustExist() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+        insertOperation(request, UUID.randomUUID());
+
+        assertThatThrownBy(() -> jdbc.sql("UPDATE dispatch_operation SET applied_inbox_id = :id")
+                .param("id", UUID.randomUUID())
+                .update())
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("dispatch_operation_applied_inbox_fk");
     }
 
     @Test
