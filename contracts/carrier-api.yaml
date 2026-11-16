@@ -477,7 +477,9 @@ components:
           format: uuid
         sequence:
           type: integer
+          format: int32
           minimum: 1
+          maximum: 2147483647
           description: Order of results within one operation; a greater value is more recent.
         status:
           type: string
@@ -488,10 +490,15 @@ components:
         price:
           type: [number, 'null']
           minimum: 0
-          description: Delivery price in rubles, two decimal places.
+          maximum: 9999999999.99
+          multipleOf: 0.01
+          description: Delivery price in rubles, at most two decimal places.
         reason:
           type: [string, 'null']
-          description: Rejection reason.
+          minLength: 1
+          maxLength: 1000
+          pattern: '^[^\x00-\x1F\x7F]*$'
+          description: Rejection reason, without control characters.
         occurredAt:
           type: string
           format: date-time

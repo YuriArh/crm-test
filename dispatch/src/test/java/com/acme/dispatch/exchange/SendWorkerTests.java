@@ -417,7 +417,7 @@ class SendWorkerTests {
                 .param("started", toSql(START))
                 .update();
         // The result comes in as the feed poller handles it: received, then processed.
-        assertThat(results.deliver(TestFeed.succeeded(1, request.operationId(), "TRK-1", "325.00")))
+        assertThat(results.deliver(TestFeed.succeeded(1, request.operationId(), "TRK-00000001", "325.00")))
                 .isEqualTo("APPLIED");
         assertThat(operation(request).deliveryStatus()).isEqualTo(DeliveryStatus.ACKNOWLEDGED);
     }

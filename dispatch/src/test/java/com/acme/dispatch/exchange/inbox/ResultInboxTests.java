@@ -70,8 +70,8 @@ class ResultInboxTests {
         assertThat(accept(inProgress(1, request.operationId()))).isEqualTo("APPLIED");
         assertThat(row(request)).isEqualTo(new Row("IN_PROGRESS", null, null, null, null, 1));
 
-        assertThat(accept(succeeded(2, request.operationId(), "TRK-1", "612.50"))).isEqualTo("APPLIED");
-        assertThat(row(request)).isEqualTo(new Row("SUCCEEDED", "TRK-1", new BigDecimal("612.50"), null,
+        assertThat(accept(succeeded(2, request.operationId(), "TRK-00000001", "612.50"))).isEqualTo("APPLIED");
+        assertThat(row(request)).isEqualTo(new Row("SUCCEEDED", "TRK-00000001", new BigDecimal("612.50"), null,
                 Instant.parse("2026-11-12T09:00:05Z"), 2));
         assertThat(operation(request).lastAppliedSeq()).isEqualTo(2);
         assertThat(processing(request)).containsExactly("1:APPLIED", "2:APPLIED");
@@ -92,7 +92,7 @@ class ResultInboxTests {
     @Test
     void repeatedMessageIsCountedWithoutEffect() {
         RequestCard request = requests.create("1");
-        JsonNode message = succeeded(1, request.operationId(), "TRK-1", "325.00");
+        JsonNode message = succeeded(1, request.operationId(), "TRK-00000001", "325.00");
         accept(message);
 
         assertThat(accept(message)).isEqualTo("DUPLICATE");
@@ -106,7 +106,7 @@ class ResultInboxTests {
     @Test
     void olderResultIsStaleAndDoesNotRollBack() {
         RequestCard request = requests.create("1");
-        accept(succeeded(1, request.operationId(), "TRK-1", "325.00"));
+        accept(succeeded(1, request.operationId(), "TRK-00000001", "325.00"));
 
         assertThat(accept(inProgress(2, request.operationId()))).isEqualTo("STALE");
 
@@ -117,7 +117,7 @@ class ResultInboxTests {
     @Test
     void sameSequenceWithOtherContentIsAConflict() {
         RequestCard request = requests.create("1");
-        accept(succeeded(1, request.operationId(), "TRK-1", "325.00"));
+        accept(succeeded(1, request.operationId(), "TRK-00000001", "325.00"));
 
         assertThat(accept(rejected(2, request.operationId(), "Передумали"))).isEqualTo("CONFLICT");
 
@@ -130,9 +130,9 @@ class ResultInboxTests {
     @Test
     void sameSequenceWithSameContentUnderANewMessageIdIsStale() {
         RequestCard request = requests.create("1");
-        accept(succeeded(1, request.operationId(), "TRK-1", "325.00"));
+        accept(succeeded(1, request.operationId(), "TRK-00000001", "325.00"));
 
-        assertThat(accept(succeeded(2, request.operationId(), "TRK-1", "325.0"))).isEqualTo("STALE");
+        assertThat(accept(succeeded(2, request.operationId(), "TRK-00000001", "325.0"))).isEqualTo("STALE");
     }
 
     @Test

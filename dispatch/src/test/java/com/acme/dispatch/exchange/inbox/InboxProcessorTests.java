@@ -65,7 +65,7 @@ class InboxProcessorTests {
     @Test
     void receivedRecordWaitsAndIsProcessedOnceByTheNextPass() {
         RequestCard request = requests.create("1");
-        UUID id = results.receive(succeeded(1, request.operationId(), "TRK-1", "325.00")).orElseThrow();
+        UUID id = results.receive(succeeded(1, request.operationId(), "TRK-00000001", "325.00")).orElseThrow();
 
         // As after a crash between the two steps: received, not processed yet.
         assertThat(results.status(id)).isEqualTo("RECEIVED");
@@ -85,8 +85,8 @@ class InboxProcessorTests {
         doThrow(new DataIntegrityViolationException("simulated: numeric field overflow"))
                 .doCallRealMethod()
                 .when(dao).applyToRequest(any(), any(), any());
-        UUID bad = results.receive(succeeded(1, rejected.operationId(), "TRK-1", "325.00")).orElseThrow();
-        UUID good = results.receive(succeeded(2, next.operationId(), "TRK-2", "350.00")).orElseThrow();
+        UUID bad = results.receive(succeeded(1, rejected.operationId(), "TRK-00000001", "325.00")).orElseThrow();
+        UUID good = results.receive(succeeded(2, next.operationId(), "TRK-00000002", "350.00")).orElseThrow();
 
         processor.processDue();
 

@@ -58,7 +58,7 @@ class FeedPollerTests {
     @Test
     void pageIsAppliedAndTheCursorMoves() {
         RequestCard request = requests.create("12.5");
-        carrier.publish(inProgress(1, request.operationId()), succeeded(2, request.operationId(), "TRK-1", "612.50"));
+        carrier.publish(inProgress(1, request.operationId()), succeeded(2, request.operationId(), "TRK-00000001", "612.50"));
 
         assertThat(poller.runOnce()).isEqualTo(2);
 
@@ -74,7 +74,7 @@ class FeedPollerTests {
         poller.runOnce();
 
         // As after a restart: the cursor is in the database, the feed has grown.
-        carrier.publish(succeeded(2, request.operationId(), "TRK-1", "325.00"));
+        carrier.publish(succeeded(2, request.operationId(), "TRK-00000001", "325.00"));
         assertThat(poller.runOnce()).isEqualTo(1);
 
         assertThat(cursor.read()).isEqualTo(2);
@@ -86,7 +86,7 @@ class FeedPollerTests {
     void malformedEntryDoesNotBlockTheFeed() {
         RequestCard request = requests.create("1");
         carrier.publish(raw("{\"feedSeq\": 1, \"messageId\": \"broken\"}"),
-                succeeded(2, request.operationId(), "TRK-1", "325.00"));
+                succeeded(2, request.operationId(), "TRK-00000001", "325.00"));
 
         assertThat(poller.runOnce()).isEqualTo(2);
 
@@ -100,8 +100,8 @@ class FeedPollerTests {
     void priceTheDatabaseCannotHoldDoesNotStopTheFeed() {
         RequestCard bad = requests.create("1");
         RequestCard next = requests.create("2");
-        carrier.publish(succeeded(1, bad.operationId(), "TRK-1", "10000000000000.00"),
-                succeeded(2, next.operationId(), "TRK-2", "350.00"));
+        carrier.publish(succeeded(1, bad.operationId(), "TRK-00000001", "10000000000000.00"),
+                succeeded(2, next.operationId(), "TRK-00000002", "350.00"));
 
         assertThat(poller.runOnce()).isEqualTo(2);
 
@@ -109,6 +109,8 @@ class FeedPollerTests {
         assertThat(status(next)).isEqualTo("SUCCEEDED");
         assertThat(status(bad)).isEqualTo("AWAITING");
         assertThat(processing(bad)).isEqualTo("INVALID");
+        assertThat(reason(bad)).as("caught by the contract check, not by the database")
+                .startsWith("price").doesNotContain("database");
     }
 
     @Test
@@ -116,7 +118,7 @@ class FeedPollerTests {
         RequestCard bad = requests.create("1");
         RequestCard next = requests.create("2");
         carrier.publish(rejected(1, bad.operationId(), "bad\u0000reason"),
-                succeeded(2, next.operationId(), "TRK-2", "350.00"));
+                succeeded(2, next.operationId(), "TRK-00000002", "350.00"));
 
         assertThat(poller.runOnce()).isEqualTo(2);
 
@@ -132,15 +134,18 @@ class FeedPollerTests {
         RequestCard bad = requests.create("1");
         RequestCard next = requests.create("2");
         carrier.publish(raw("""
-                {"feedSeq": 1, "messageId": "m-big", "operationId": "%s", "sequence": 4294967297,
-                 "status": "IN_PROGRESS", "occurredAt": "2026-11-12T09:00:05Z"}""".formatted(bad.operationId())),
-                succeeded(2, next.operationId(), "TRK-2", "350.00"));
+                {"feedSeq": 1, "messageId": "%s", "operationId": "%s", "sequence": 4294967297,
+                 "status": "IN_PROGRESS", "occurredAt": "2026-11-12T09:00:05Z"}"""
+                .formatted(UUID.randomUUID(), bad.operationId())),
+                succeeded(2, next.operationId(), "TRK-00000002", "350.00"));
 
         assertThat(poller.runOnce()).isEqualTo(2);
 
         assertThat(cursor.read()).isEqualTo(2);
         assertThat(status(next)).isEqualTo("SUCCEEDED");
         assertThat(status(bad)).isEqualTo("AWAITING");
+        assertThat(jdbc.sql("SELECT processing_status || ':' || reason FROM inbox WHERE feed_seq = 1")
+                .query(String.class).single()).startsWith("INVALID:sequence");
     }
 
     @Test
@@ -160,7 +165,7 @@ class FeedPollerTests {
     @Test
     void duplicateDeliveryInTheFeedHasNoSecondEffect() {
         RequestCard request = requests.create("1");
-        JsonNode result = succeeded(1, request.operationId(), "TRK-1", "325.00");
+        JsonNode result = succeeded(1, request.operationId(), "TRK-00000001", "325.00");
         carrier.publish(result, atFeedSeq(result, 2));
 
         poller.runOnce();
@@ -249,6 +254,11 @@ class FeedPollerTests {
 
     private String processing(RequestCard request) {
         return jdbc.sql("SELECT processing_status FROM inbox WHERE operation_id = :id")
+                .param("id", request.operationId()).query(String.class).single();
+    }
+
+    private String reason(RequestCard request) {
+        return jdbc.sql("SELECT reason FROM inbox WHERE operation_id = :id")
                 .param("id", request.operationId()).query(String.class).single();
     }
 

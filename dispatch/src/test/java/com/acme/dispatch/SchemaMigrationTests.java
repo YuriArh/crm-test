@@ -42,7 +42,7 @@ class SchemaMigrationTests {
     @Test
     void allMigrationsAreApplied() {
         assertThat(Arrays.stream(flyway.info().applied()).map(MigrationInfo::getVersion).map(Object::toString))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8");
     }
 
     @Test
@@ -159,6 +159,46 @@ class SchemaMigrationTests {
         assertThatThrownBy(() -> insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ZERO))
                 .isInstanceOf(DataIntegrityViolationException.class)
                 .hasMessageContaining("delivery_request_weight_range");
+    }
+
+    @Test
+    void trackingNumberLongerThan64IsRejected() {
+        UUID id = insertRequest(NORTH, NORTH_INITIATOR, null, new BigDecimal("3.0"));
+
+        assertThatThrownBy(() -> jdbc.sql("""
+                        UPDATE delivery_request
+                        SET business_status = 'SUCCEEDED', tracking_number = :tracking, price = 100, result_at = :now
+                        WHERE id = :id""")
+                .param("tracking", "T".repeat(65)).param("now", NOW).param("id", id).update())
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("delivery_request_tracking_number_length");
+    }
+
+    @Test
+    void rejectionReasonLongerThan1000IsRejected() {
+        UUID id = insertRequest(NORTH, NORTH_INITIATOR, null, new BigDecimal("3.0"));
+
+        assertThatThrownBy(() -> jdbc.sql("""
+                        UPDATE delivery_request
+                        SET business_status = 'REJECTED', rejection_reason = :reason, result_at = :now
+                        WHERE id = :id""")
+                .param("reason", "r".repeat(1001)).param("now", NOW).param("id", id).update())
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("delivery_request_rejection_reason_length");
+    }
+
+    @Test
+    void resultFieldsAtTheirLimitsAreAccepted() {
+        UUID id = insertRequest(NORTH, NORTH_INITIATOR, null, new BigDecimal("3.0"));
+
+        jdbc.sql("""
+                        UPDATE delivery_request
+                        SET business_status = 'SUCCEEDED', tracking_number = :tracking, price = 9999999999.99,
+                            result_at = :now
+                        WHERE id = :id""")
+                .param("tracking", "T".repeat(64)).param("now", NOW).param("id", id).update();
+
+        assertThat(count("SELECT count(*) FROM delivery_request WHERE char_length(tracking_number) = 64")).isEqualTo(1);
     }
 
     @Test
