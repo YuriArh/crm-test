@@ -4,6 +4,7 @@ import static com.acme.dispatch.common.SqlTime.toSql;
 
 import java.time.Instant;
 import java.util.Collection;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -51,6 +52,28 @@ public class ProblemDao {
                 .param("requestId", requestId)
                 .param("kind", kind.name())
                 .update() == 1;
+    }
+
+    /** Closes one open problem with an operator's decision. Returns whether it was open. */
+    public boolean closeById(UUID problemId, ProblemDecision decision, UUID operatorId, String comment, Instant now) {
+        return jdbc.sql("""
+                        UPDATE problem SET status = 'RESOLVED', resolved_at = :now, resolved_by = :operatorId,
+                                           decision = :decision, comment = :comment
+                         WHERE id = :id AND status = 'OPEN'""")
+                .param("now", toSql(now))
+                .param("operatorId", operatorId)
+                .param("decision", decision.name())
+                .param("comment", comment)
+                .param("id", problemId)
+                .update() == 1;
+    }
+
+    /** The record a problem is about, if it is a record problem. */
+    public Optional<UUID> recordOf(UUID problemId) {
+        return jdbc.sql("SELECT inbox_id FROM problem WHERE id = :id AND inbox_id IS NOT NULL")
+                .param("id", problemId)
+                .query(UUID.class)
+                .optional();
     }
 
     /** Closes the request's open problems of these kinds as the system did. Returns how many it closed. */

@@ -615,6 +615,88 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/problems/{id}/resolve:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Problem id. A malformed id answers `404`, like a missing problem.
+        schema:
+          type: string
+    post:
+      tags: [problems]
+      operationId: resolveProblem
+      summary: Decide on a problem
+      security:
+        - session: []
+          csrf: []
+      description: |
+        Operators only; a problem of another service answers `404`. The decision must be one of the problem's
+        `actions`: `APPLY_CARRIER` (replace the request's result with the disputed final record) or `KEEP_OURS`
+        for `RESULT_CONFLICT`; `ACKNOWLEDGED` for `INVALID_MESSAGE` and `MESSAGE_FAILED`. Delivery problems are
+        closed by the system or by retrying the delivery. `APPLY_CARRIER` bumps the request's `version`.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Client-generated key of this action, at most 100 characters.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveProblem'
+            examples:
+              keep:
+                value:
+                  decision: KEEP_OURS
+                  comment: Перевозчик подтвердил прежний номер
+      responses:
+        '200':
+          description: The problem after the decision, or the replay of an earlier decision with the same key.
+          headers:
+            Idempotent-Replayed:
+              description: '`true` when this response was replayed for a repeated `Idempotency-Key`.'
+              schema:
+                type: string
+                enum: ['true', 'false']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExchangeProblem'
+        '400':
+          description: Invalid body, or no `Idempotency-Key` header (`IDEMPOTENCY_KEY_REQUIRED`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No such problem in the caller's scope.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: '`INVALID_STATE`: the problem is resolved already, or the decision is not one of its `actions`.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: The `Idempotency-Key` was already used for another action or problem.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
 components:
   securitySchemes:
     session:
@@ -1291,6 +1373,20 @@ components:
           description: Decisions an operator may take now; decided by the server.
           items:
             $ref: '#/components/schemas/ProblemDecision'
+
+    ResolveProblem:
+      type: object
+      additionalProperties: false
+      required: [decision, comment]
+      properties:
+        decision:
+          type: string
+          enum: [APPLY_CARRIER, KEEP_OURS, ACKNOWLEDGED]
+        comment:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: The ground for the decision; stored stripped, must not be blank.
 
     ExchangeProblemPage:
       type: object

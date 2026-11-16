@@ -30,8 +30,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 /** Who may see problems and act on them (NF02, operator-problems.md §2.4–2.5). */
 @IntegrationTest
@@ -128,6 +130,41 @@ class ProblemAccessTests {
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.code").value("NOT_FOUND"));
         }
+    }
+
+    @Test
+    void onlyOperatorsOfTheServiceResolve() throws Exception {
+        RequestCard north = requests.create("1");
+        UUID problem = UUID.randomUUID();
+        jdbc.sql("""
+                        INSERT INTO inbox (id, payload, source, processing_status, received_at)
+                        VALUES (:id, '{}', 'RECONCILIATION', 'INVALID', now())""")
+                .param("id", problem)
+                .update();
+        problems.open(problem, ProblemKind.INVALID_MESSAGE, north.id(), problem, "bad", START);
+
+        mvc.perform(resolve(problem, "k-1").with(asUser(users, NORTH_INITIATOR_LOGIN)))
+                .andExpect(status().isForbidden());
+        mvc.perform(resolve(problem, "k-2").with(asUser(users, SOUTH_OPERATOR_LOGIN)))
+                .andExpect(status().isNotFound());
+        mvc.perform(resolve(problem, "k-3").with(asUser(users, NORTH_OPERATOR_LOGIN)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void problemWithoutRequestIsResolvedByAnyOperator() throws Exception {
+        results.deliver(succeeded(1, UUID.randomUUID(), "TRK-00000001", "325.00"));
+        UUID orphan = jdbc.sql("SELECT id FROM problem WHERE request_id IS NULL").query(UUID.class).single();
+
+        mvc.perform(resolve(orphan, "k-1").with(asUser(users, SOUTH_OPERATOR_LOGIN)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.resolvedBy.id").value(SOUTH_OPERATOR.toString()));
+    }
+
+    private MockHttpServletRequestBuilder resolve(UUID problem, String key) {
+        return post("/api/problems/{id}/resolve", problem).header("Idempotency-Key", key).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"decision\": \"ACKNOWLEDGED\", \"comment\": \"Checked\"}");
     }
 
     private UUID open(RequestCard request) {

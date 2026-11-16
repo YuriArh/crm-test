@@ -9,10 +9,13 @@ import com.acme.dispatch.common.web.ApiException;
 import com.acme.dispatch.idempotency.IdempotentOutcome;
 import com.acme.dispatch.request.RequestCard;
 
+import jakarta.validation.Valid;
+
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -34,6 +37,20 @@ class OperatorActionController {
                                       @RequestHeader(IDEMPOTENCY_KEY_HEADER) String idempotencyKey,
                                       @AuthenticationPrincipal CurrentUser user) {
         return respond(actions.retry(user, requestId(id), idempotencyKey));
+    }
+
+    @PostMapping("/api/problems/{id}/resolve")
+    ResponseEntity<ExchangeProblem> resolve(@PathVariable String id,
+                                            @RequestHeader(IDEMPOTENCY_KEY_HEADER) String idempotencyKey,
+                                            @Valid @RequestBody ResolveProblemBody body,
+                                            @AuthenticationPrincipal CurrentUser user) {
+        UUID problemId;
+        try {
+            problemId = UUID.fromString(id);
+        } catch (IllegalArgumentException e) {
+            throw ApiException.notFound("Problem " + id + " not found");
+        }
+        return respond(actions.resolve(user, problemId, idempotencyKey, body));
     }
 
     private static <T> ResponseEntity<T> respond(IdempotentOutcome<T> outcome) {

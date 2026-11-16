@@ -222,6 +222,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/problems/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Problem id. A malformed id answers `404`, like a missing problem. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decide on a problem
+         * @description Operators only; a problem of another service answers `404`. The decision must be one of the problem's
+         *     `actions`: `APPLY_CARRIER` (replace the request's result with the disputed final record) or `KEEP_OURS`
+         *     for `RESULT_CONFLICT`; `ACKNOWLEDGED` for `INVALID_MESSAGE` and `MESSAGE_FAILED`. Delivery problems are
+         *     closed by the system or by retrying the delivery. `APPLY_CARRIER` bumps the request's `version`.
+         */
+        post: operations["resolveProblem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -484,6 +510,12 @@ export interface components {
             comment: string | null;
             /** @description Decisions an operator may take now; decided by the server. */
             actions: components["schemas"]["ProblemDecision"][];
+        };
+        ResolveProblem: {
+            /** @enum {string} */
+            decision: "APPLY_CARRIER" | "KEEP_OURS" | "ACKNOWLEDGED";
+            /** @description The ground for the decision; stored stripped, must not be blank. */
+            comment: string;
         };
         ExchangeProblemPage: {
             items: components["schemas"]["ExchangeProblem"][];
@@ -932,6 +964,76 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    resolveProblem: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Client-generated key of this action, at most 100 characters. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Problem id. A malformed id answers `404`, like a missing problem. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveProblem"];
+            };
+        };
+        responses: {
+            /** @description The problem after the decision, or the replay of an earlier decision with the same key. */
+            200: {
+                headers: {
+                    /** @description `true` when this response was replayed for a repeated `Idempotency-Key`. */
+                    "Idempotent-Replayed"?: "true" | "false";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExchangeProblem"];
+                };
+            };
+            /** @description Invalid body, or no `Idempotency-Key` header (`IDEMPOTENCY_KEY_REQUIRED`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            /** @description No such problem in the caller's scope. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description `INVALID_STATE`: the problem is resolved already, or the decision is not one of its `actions`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The `Idempotency-Key` was already used for another action or problem. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
 }

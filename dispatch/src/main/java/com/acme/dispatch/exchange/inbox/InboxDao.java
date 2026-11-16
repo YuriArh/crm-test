@@ -193,6 +193,31 @@ public class InboxDao {
                 .update() == 1;
     }
 
+    /** The raw text of a record. */
+    String payloadOf(UUID inboxId) {
+        return jdbc.sql("SELECT payload FROM inbox WHERE id = :id")
+                .param("id", inboxId)
+                .query(String.class)
+                .single();
+    }
+
+    /**
+     * An operator chose this record: it becomes the applied one; the applied sequence never goes back. Delivery is
+     * already confirmed (results of the operation were applied before).
+     */
+    void makeApplied(UUID operationId, int sequence, UUID inboxId, Instant now) {
+        jdbc.sql("""
+                        UPDATE dispatch_operation
+                           SET last_applied_seq = GREATEST(last_applied_seq, :sequence), applied_inbox_id = :inboxId,
+                               updated_at = :now
+                         WHERE operation_id = :operationId""")
+                .param("sequence", sequence)
+                .param("inboxId", inboxId)
+                .param("now", toSql(now))
+                .param("operationId", operationId)
+                .update();
+    }
+
     /** The request of an operation, if the operation is known; nothing is locked. */
     Optional<UUID> requestOf(UUID operationId) {
         return jdbc.sql("SELECT request_id FROM dispatch_operation WHERE operation_id = :operationId")

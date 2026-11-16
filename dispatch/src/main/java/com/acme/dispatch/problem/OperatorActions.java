@@ -9,6 +9,7 @@ import com.acme.dispatch.common.BusinessCalendar;
 import com.acme.dispatch.common.web.ApiException;
 import com.acme.dispatch.common.web.ErrorCode;
 import com.acme.dispatch.exchange.SendQueueDao;
+import com.acme.dispatch.exchange.inbox.OperatorResults;
 import com.acme.dispatch.idempotency.IdempotencyService;
 import com.acme.dispatch.idempotency.IdempotentOutcome;
 import com.acme.dispatch.idempotency.IdempotentResponse;
@@ -30,22 +31,69 @@ import org.springframework.transaction.annotation.Transactional;
 public class OperatorActions {
 
     static final String RETRY_OPERATION = "RETRY_DELIVERY";
+    static final String RESOLVE_OPERATION = "RESOLVE_PROBLEM";
 
     private static final Logger log = LoggerFactory.getLogger(OperatorActions.class);
 
     private final RequestQueryService cards;
     private final SendQueueDao queue;
     private final ProblemDao problems;
+    private final ProblemQueryDao problemQueries;
+    private final OperatorResults results;
     private final IdempotencyService idempotency;
     private final BusinessCalendar calendar;
 
     public OperatorActions(RequestQueryService cards, SendQueueDao queue, ProblemDao problems,
-                           IdempotencyService idempotency, BusinessCalendar calendar) {
+                           ProblemQueryDao problemQueries, OperatorResults results, IdempotencyService idempotency,
+                           BusinessCalendar calendar) {
         this.cards = cards;
         this.queue = queue;
         this.problems = problems;
+        this.problemQueries = problemQueries;
+        this.results = results;
         this.idempotency = idempotency;
         this.calendar = calendar;
+    }
+
+    /**
+     * Decides on a problem: «принять результат перевозчика» ({@code APPLY_CARRIER}) or «оставить наш»
+     * ({@code KEEP_OURS}) for a result conflict, «Разобрано» ({@code ACKNOWLEDGED}) for a record problem. The
+     * decision must be one of the problem's actions. {@code APPLY_CARRIER} locks the operation row first, then closes
+     * the problem — the lock order of the exchange (operation before problem). Closing is conditional on the problem
+     * being open, so of two concurrent decisions one wins and the other is {@code 409}. Returns the problem after it.
+     */
+    @Transactional
+    public IdempotentOutcome<ExchangeProblem> resolve(CurrentUser user, UUID problemId, String idempotencyKey,
+                                                      ResolveProblemBody body) {
+        ProblemController.requireOperator(user);
+        ExchangeProblem problem = problemQueries.find(problemId, user)
+                .orElseThrow(() -> ApiException.notFound("Problem " + problemId + " not found"));
+        Map<String, Object> request = Map.of("problemId", problemId, "decision", body.decision(),
+                "comment", body.comment());
+        return idempotency.execute(user.id(), idempotencyKey, RESOLVE_OPERATION, request, ExchangeProblem.class,
+                () -> {
+                    if (!problem.actions().contains(body.decision())) {
+                        throw invalidDecision(problem, body.decision());
+                    }
+                    Instant now = calendar.now();
+                    if (body.decision() == ProblemDecision.APPLY_CARRIER) {
+                        results.applyChosen(problems.recordOf(problemId).orElseThrow(), now);
+                    }
+                    if (!problems.closeById(problemId, body.decision(), user.id(), body.comment(), now)) {
+                        throw invalidDecision(problem, body.decision());
+                    }
+                    log.info("Operator {} resolved problem {} {} of request {}: {}", user.username(), problemId,
+                            problem.kind(), problem.request() == null ? "-" : problem.request().number(),
+                            body.decision());
+                    return new IdempotentResponse<>(200, problemQueries.find(problemId, user).orElseThrow(),
+                            problemId);
+                });
+    }
+
+    private static ApiException invalidDecision(ExchangeProblem problem, ProblemDecision decision) {
+        return new ApiException(ErrorCode.INVALID_STATE, "Problem " + problem.id() + " (" + problem.kind()
+                + ") does not accept " + decision + " now; it is " + problem.status() + ", allowed: "
+                + problem.actions());
     }
 
     /**
