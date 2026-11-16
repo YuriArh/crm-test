@@ -3,7 +3,7 @@
 export
 
 .PHONY: help up down reset logs logs-carrier ps db build test run wait e2e seed contracts-lint carrier-ops \
-        faults fault-unavailable fault-lose-response fault-duplicate fault-delayed fault-off \
+        faults fault-unavailable fault-lose-response fault-duplicate fault-delayed fault-malformed fault-off \
         dispatch-kill dispatch-start db-kill db-start \
         web-install web-dev web-build web-test web-e2e web-api-types web-api-check
 
@@ -79,10 +79,10 @@ seed: wait ## Create demo requests through the API (safe to re-run; start the st
 carrier-ops: ## Show carrier-emulator operations with execution counters (newest 100)
 	@curl -sf $(CARRIER_BASE_URL)/admin/operations || echo "carrier-emulator is not reachable at $(CARRIER_BASE_URL)"
 
-# PUT /admin/faults with the four switches in the order unavailable, loseResponse, duplicate, delayed.
+# PUT /admin/faults with the five switches in the order unavailable, loseResponse, duplicate, delayed, malformed.
 define set-faults
 	@curl -sf -X PUT $(CARRIER_BASE_URL)/admin/faults -H 'Content-Type: application/json' \
-	  -d '{"unavailable":$(1),"loseResponse":$(2),"duplicate":$(3),"delayed":$(4)}' \
+	  -d '{"unavailable":$(1),"loseResponse":$(2),"duplicate":$(3),"delayed":$(4),"malformed":$(5)}' \
 	  && echo || echo "carrier-emulator is not reachable at $(CARRIER_BASE_URL)"
 endef
 
@@ -90,19 +90,22 @@ faults: ## Show carrier-emulator fault modes
 	@curl -sf $(CARRIER_BASE_URL)/admin/faults && echo || echo "carrier-emulator is not reachable at $(CARRIER_BASE_URL)"
 
 fault-unavailable: ## Switch on only the unavailable fault mode
-	$(call set-faults,true,false,false,false)
+	$(call set-faults,true,false,false,false,false)
 
 fault-lose-response: ## Switch on only the loseResponse fault mode
-	$(call set-faults,false,true,false,false)
+	$(call set-faults,false,true,false,false,false)
 
 fault-duplicate: ## Switch on only the duplicate fault mode
-	$(call set-faults,false,false,true,false)
+	$(call set-faults,false,false,true,false,false)
 
 fault-delayed: ## Switch on only the delayed fault mode
-	$(call set-faults,false,false,false,true)
+	$(call set-faults,false,false,false,true,false)
+
+fault-malformed: ## Switch on only the malformed fault mode (feed responses carry a broken price in SUCCEEDED entries)
+	$(call set-faults,false,false,false,false,true)
 
 fault-off: ## Switch off all fault modes
-	$(call set-faults,false,false,false,false)
+	$(call set-faults,false,false,false,false,false)
 
 contracts-lint: ## Lint the OpenAPI contracts in contracts/ (Redocly CLI in Docker)
 	docker run --rm -v "$(CURDIR)/contracts:/spec" -w /spec $(REDOCLY_IMAGE) lint carrier-api.yaml dispatch-api.yaml

@@ -38,7 +38,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class DelayedTests {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
-    private static final Faults DELAYED = new Faults(false, false, false, true);
+    private static final Faults DELAYED = new Faults(false, false, false, true, false);
 
     @Autowired
     MockMvc mockMvc;
@@ -229,7 +229,7 @@ class DelayedTests {
 
     @Test
     void deferredPublicationIsDuplicatedTooWithDuplicate() throws Exception {
-        faults.set(new Faults(false, false, true, true));
+        faults.set(new Faults(false, false, true, true, false));
         UUID id = submitted();
         faults.set(Faults.OFF);
         executor.runOnce();

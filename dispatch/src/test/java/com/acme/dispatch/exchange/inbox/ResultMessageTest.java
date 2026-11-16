@@ -81,6 +81,7 @@ class ResultMessageTest {
         assertThat(succeeded("0").isValid()).isTrue();
         assertThat(succeeded("612.50").isValid()).isTrue();
         assertThat(succeeded("10000000000.00").invalidReason()).contains("price");
+        assertThat(succeeded("1e13").invalidReason()).as("the value is quoted readably").endsWith(": 10000000000000");
         assertThat(succeeded("1.234").invalidReason()).contains("price");
         assertThat(succeeded("-0.01").invalidReason()).contains("price");
     }

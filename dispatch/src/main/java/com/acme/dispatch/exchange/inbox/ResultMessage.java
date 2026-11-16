@@ -65,7 +65,7 @@ public record ResultMessage(
             invalid = "trackingNumber does not match TRK-XXXXXXXX: " + quote(trackingNumber);
         } else if (price != null && !validPrice(price)) {
             invalid = "price is not a number in 0.." + MAX_PRICE.toPlainString() + " with at most 2 decimals: "
-                    + quote(price.toString());
+                    + quote(price.toPlainString());
         } else if (!raw.path("price").isMissingNode() && !raw.path("price").isNull() && price == null) {
             invalid = "price is not a number in 0.." + MAX_PRICE.toPlainString() + ": " + quote(raw.path("price").toString());
         } else if (reason != null && !validReason(reason)) {

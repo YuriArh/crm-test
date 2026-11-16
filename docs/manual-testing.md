@@ -90,7 +90,7 @@ make fault-off     # все режимы сбоев выключены
 
    ```bash
    curl -X PUT localhost:8081/admin/faults -H 'Content-Type: application/json' \
-     -d '{"unavailable":false,"loseResponse":true,"duplicate":false,"delayed":true}'
+     -d '{"unavailable":false,"loseResponse":true,"duplicate":false,"delayed":true,"malformed":false}'
    ```
 
 2. Создайте заявку и **в течение 5 секунд** `make dispatch-kill`. Окно в 5 с — это таймаут ответа `dispatch`:

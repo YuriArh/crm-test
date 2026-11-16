@@ -34,7 +34,7 @@ import org.springframework.test.web.servlet.MockMvc;
 @IntegrationTest
 class DuplicateTests {
 
-    static final Faults DUPLICATE = new Faults(false, false, true, false);
+    static final Faults DUPLICATE = new Faults(false, false, true, false, false);
 
     @Autowired
     MockMvc mockMvc;

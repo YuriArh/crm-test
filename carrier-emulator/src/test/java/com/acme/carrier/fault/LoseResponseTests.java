@@ -69,7 +69,7 @@ class LoseResponseTests {
     }
 
     private void loseResponseOn() {
-        faults.set(new Faults(false, true, false, false));
+        faults.set(new Faults(false, true, false, false, false));
     }
 
     /** During each pause the clock moves by the pause, as it would with real sleeping. */
