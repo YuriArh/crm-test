@@ -193,11 +193,13 @@ public class InboxDao {
     }
 
     /** How a processed record was decided; stored as {@code inbox.processing_status}. */
-    enum Decision {
+    public enum Decision {
         APPLIED,
         STALE,
         CONFLICT,
-        INVALID
+        INVALID,
+        /** Processing kept failing; recorded only by {@link #recordFailed}. */
+        FAILED
     }
 
     /** A received record claimed for processing. */

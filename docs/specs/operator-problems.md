@@ -145,9 +145,12 @@
   индексам — повторное открытие уже открытой проблемы ничего не делает), закрыть системой, закрыть оператором
   (условно, `WHERE status = 'OPEN'`), список, проблемы заявки;
 - `ProblemService` — два входа для обмена и действия оператора (§2.4):
-  - `onDeliveryStatus(requestId, newStatus, details, now)` — вызывается после каждого сработавшего перехода
-    доставки: `UNKNOWN` → открыть `DELIVERY_UNKNOWN`; `FAILED` → открыть `DELIVERY_FAILED`; `ACKNOWLEDGED` → закрыть
-    обе (`SYSTEM`); `PENDING`, `SENDING`, `RETRY_WAIT` — ничего;
+  - `onDeliveryStatus(requestId, operationId, newStatus, lastError, unknownOutcome, now)` — вызывается после каждого
+    сработавшего перехода доставки: `UNKNOWN` → открыть `DELIVERY_UNKNOWN`; `FAILED` → открыть `DELIVERY_FAILED`, а
+    если попытка, исчерпавшая бюджет, сама закончилась неизвестным исходом (таймаут, прерванная отправка;
+    `unknownOutcome` — её ошибка), то и `DELIVERY_UNKNOWN`: перевозчик мог её получить; `ACKNOWLEDGED` → закрыть
+    обе (`SYSTEM`); `PENDING`, `SENDING`, `RETRY_WAIT` — ничего. Причина `DELIVERY_UNKNOWN` — ошибка попытки с
+    неизвестным исходом, `DELIVERY_FAILED` — новый `last_error`;
   - `onInboxOutcome(inboxId, requestId, decision, reason, now)` — после записи исхода разбора: `INVALID` →
     `INVALID_MESSAGE`, `FAILED` → `MESSAGE_FAILED`, `CONFLICT` → `RESULT_CONFLICT`; остальные — ничего.
 
