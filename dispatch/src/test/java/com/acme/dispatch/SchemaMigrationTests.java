@@ -42,7 +42,75 @@ class SchemaMigrationTests {
     @Test
     void allMigrationsAreApplied() {
         assertThat(Arrays.stream(flyway.info().applied()).map(MigrationInfo::getVersion).map(Object::toString))
-                .containsExactly("1", "2", "3", "4", "5", "6");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7");
+    }
+
+    @Test
+    void inboxKeepsTheRawRecordAsText() {
+        assertThat(jdbc.sql("""
+                        SELECT data_type FROM information_schema.columns
+                         WHERE table_name = 'inbox' AND column_name = 'payload'""")
+                .query(String.class).single()).isEqualTo("text");
+    }
+
+    @Test
+    void inboxAttemptsCannotBeNegative() {
+        assertThatThrownBy(() -> insertInbox("APPLIED", 1L, -1, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("inbox_attempts_non_negative");
+    }
+
+    @Test
+    void receivedInboxRecordNeedsANextAttempt() {
+        assertThatThrownBy(() -> insertInbox("RECEIVED", 1L, 0, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("inbox_received_has_next_attempt");
+    }
+
+    @Test
+    void processedInboxRecordHasNoNextAttempt() {
+        assertThatThrownBy(() -> insertInbox("APPLIED", 1L, 0, NOW))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("inbox_received_has_next_attempt");
+    }
+
+    @Test
+    void inboxStatusMustBeKnown() {
+        assertThatThrownBy(() -> insertInbox("DONE", 1L, 0, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("inbox_processing_status_valid");
+    }
+
+    @Test
+    void receivedAndFailedAreInboxStatuses() {
+        insertInbox("FAILED", 2L, 5, null);
+        insertInbox("RECEIVED", 3L, 0, NOW);
+
+        assertThat(count("SELECT count(*) FROM inbox WHERE processing_status IN ('FAILED', 'RECEIVED')")).isEqualTo(2);
+    }
+
+    @Test
+    void feedRecordNeedsAPosition() {
+        assertThatThrownBy(() -> insertInbox("APPLIED", null, 0, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("inbox_feed_has_feed_seq");
+    }
+
+    @Test
+    void feedPositionIsReceivedOnce() {
+        insertInbox("APPLIED", 7L, 0, null);
+
+        assertThatThrownBy(() -> insertInbox("APPLIED", 7L, 0, null))
+                .isInstanceOf(DuplicateKeyException.class)
+                .hasMessageContaining("inbox_feed_seq_unique");
+    }
+
+    @Test
+    void dueRecordsHaveAPartialIndex() {
+        assertThat(jdbc.sql("SELECT indexdef FROM pg_indexes WHERE indexname = 'inbox_due_idx'")
+                .query(String.class).single())
+                .contains("(next_attempt_at)")
+                .contains("WHERE (processing_status = 'RECEIVED'::text)");
     }
 
     @Test
@@ -157,12 +225,26 @@ class SchemaMigrationTests {
 
     private void insertInboxMessage(String messageId) {
         jdbc.sql("""
-                        INSERT INTO inbox (id, message_id, payload, source, processing_status, received_at)
-                        VALUES (:id, :message, '{}'::jsonb, 'FEED', 'APPLIED', :now)
+                        INSERT INTO inbox (id, message_id, feed_seq, payload, source, processing_status, received_at)
+                        VALUES (:id, :message, 1, '{}', 'FEED', 'APPLIED', :now)
                         ON CONFLICT (message_id) WHERE message_id IS NOT NULL
                         DO UPDATE SET duplicate_count = inbox.duplicate_count + 1, last_duplicate_at = :now""")
                 .param("id", UUID.randomUUID())
                 .param("message", messageId)
+                .param("now", NOW)
+                .update();
+    }
+
+    private void insertInbox(String status, Long feedSeq, int attempts, OffsetDateTime nextAttemptAt) {
+        jdbc.sql("""
+                        INSERT INTO inbox (id, feed_seq, payload, source, processing_status, attempts, next_attempt_at,
+                                           received_at)
+                        VALUES (:id, :feedSeq, '{}', 'FEED', :status, :attempts, :next, :now)""")
+                .param("id", UUID.randomUUID())
+                .param("feedSeq", feedSeq)
+                .param("status", status)
+                .param("attempts", attempts)
+                .param("next", nextAttemptAt)
                 .param("now", NOW)
                 .update();
     }

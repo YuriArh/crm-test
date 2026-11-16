@@ -18,7 +18,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param maxBackoff       upper bound of the pause
  * @param maxAttempts      attempts before the operation becomes {@code FAILED}
  * @param feedPageSize     entries read from the result feed per request (the carrier allows at most 100)
- * @param feedMaxBackoff   longest pause between feed reads while the carrier is unavailable
+ * @param feedMaxBackoff   longest pause between feed reads while the carrier is unavailable or its feed is broken
+ * @param inboxMaxAttempts      attempts to process a received result before it becomes {@code FAILED}
+ * @param inboxInitialBackoff   pause before the second processing attempt; doubles with every attempt
+ * @param inboxMaxBackoff       upper bound of that pause
  */
 @ConfigurationProperties(prefix = "app.exchange")
 public record ExchangeProperties(
@@ -29,5 +32,8 @@ public record ExchangeProperties(
         @DefaultValue("5m") Duration maxBackoff,
         @DefaultValue("8") int maxAttempts,
         @DefaultValue("100") int feedPageSize,
-        @DefaultValue("30s") Duration feedMaxBackoff) {
+        @DefaultValue("30s") Duration feedMaxBackoff,
+        @DefaultValue("5") int inboxMaxAttempts,
+        @DefaultValue("1s") Duration inboxInitialBackoff,
+        @DefaultValue("1m") Duration inboxMaxBackoff) {
 }

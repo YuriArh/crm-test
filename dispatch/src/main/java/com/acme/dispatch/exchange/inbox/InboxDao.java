@@ -35,29 +35,86 @@ public class InboxDao {
     }
 
     /**
-     * Stores a processed message. Returns {@code false} if a message with the same id was stored concurrently
-     * (then the caller counts it as a duplicate).
+     * Stores a received record, due for processing at once. Returns {@code false} if a record with the same message
+     * id was stored concurrently (then the caller counts it as a duplicate). A repeated feed position is not a
+     * duplicate but a broken invariant, so it fails ({@code inbox_feed_seq_unique}).
      */
-    boolean insert(UUID id, ResultMessage message, InboxSource source, String processingStatus, String reason,
-                   Instant now) {
+    boolean insertReceived(UUID id, String messageId, Long feedSeq, String payload, InboxSource source, Instant now) {
         return jdbc.sql("""
-                        INSERT INTO inbox (id, message_id, feed_seq, operation_id, sequence, result_status, payload,
-                                           source, processing_status, reason, received_at)
-                        VALUES (:id, :messageId, :feedSeq, :operationId, :sequence, :status, CAST(:payload AS jsonb),
-                                :source, :processingStatus, :reason, :now)
+                        INSERT INTO inbox (id, message_id, feed_seq, payload, source, processing_status, attempts,
+                                           next_attempt_at, received_at)
+                        VALUES (:id, :messageId, :feedSeq, :payload, :source, 'RECEIVED', 0, :now, :now)
                         ON CONFLICT (message_id) WHERE message_id IS NOT NULL DO NOTHING""")
                 .param("id", id)
-                .param("messageId", message.messageId())
-                .param("feedSeq", message.feedSeq())
-                .param("operationId", message.operationId())
-                .param("sequence", message.sequence())
-                .param("status", message.status())
-                .param("payload", JSON.writeValueAsString(message.raw()))
+                .param("messageId", messageId)
+                .param("feedSeq", feedSeq)
+                .param("payload", payload)
                 .param("source", source.name())
-                .param("processingStatus", processingStatus)
-                .param("reason", reason)
                 .param("now", toSql(now))
                 .update() == 1;
+    }
+
+    /**
+     * The oldest received record due for processing, locked until the transaction ends; records locked by another
+     * processor are skipped.
+     */
+    Optional<Pending> claimNextDue(Instant now) {
+        return jdbc.sql("""
+                        SELECT id, message_id, payload, attempts FROM inbox
+                         WHERE processing_status = 'RECEIVED' AND next_attempt_at <= :now
+                         ORDER BY received_at, feed_seq NULLS LAST, id
+                         LIMIT 1
+                           FOR UPDATE SKIP LOCKED""")
+                .param("now", toSql(now))
+                .query((rs, row) -> new Pending(rs.getObject("id", UUID.class), rs.getString("message_id"),
+                        rs.getString("payload"), rs.getInt("attempts")))
+                .optional();
+    }
+
+    /**
+     * Records how a record was decided. The parsed fields are stored only when they are safe to store: typed values,
+     * and the result status only if it is a known one.
+     */
+    void recordOutcome(UUID id, Decision decision, String reason, ResultMessage message) {
+        jdbc.sql("""
+                        UPDATE inbox
+                           SET processing_status = :status, reason = :reason, next_attempt_at = NULL,
+                               operation_id = :operationId, sequence = :sequence, result_status = :resultStatus
+                         WHERE id = :id""")
+                .param("status", decision.name())
+                .param("reason", reason)
+                .param("operationId", message == null ? null : message.operationId())
+                .param("sequence", message == null ? null : message.sequence())
+                .param("resultStatus", message == null || message.status() == null
+                        || !ResultMessage.STATUSES.contains(message.status()) ? null : message.status())
+                .param("id", id)
+                .update();
+    }
+
+    /** A temporary failure: the record stays {@code RECEIVED} and is due again at {@code nextAttemptAt}. */
+    void recordRetry(UUID id, int attempts, Instant nextAttemptAt, String error) {
+        jdbc.sql("""
+                        UPDATE inbox SET attempts = :attempts, next_attempt_at = :next, last_error = :error
+                         WHERE id = :id""")
+                .param("attempts", attempts)
+                .param("next", toSql(nextAttemptAt))
+                .param("error", error)
+                .param("id", id)
+                .update();
+    }
+
+    /** Processing kept failing: the record is {@code FAILED} and kept for review. */
+    void recordFailed(UUID id, int attempts, String reason, String error) {
+        jdbc.sql("""
+                        UPDATE inbox
+                           SET processing_status = 'FAILED', attempts = :attempts, next_attempt_at = NULL,
+                               reason = :reason, last_error = :error
+                         WHERE id = :id""")
+                .param("attempts", attempts)
+                .param("reason", reason)
+                .param("error", error)
+                .param("id", id)
+                .update();
     }
 
     /** The operation and its request's state, with the operation row locked until the transaction ends. */
@@ -126,6 +183,18 @@ public class InboxDao {
                 .param("now", toSql(now))
                 .param("operationId", operationId)
                 .update();
+    }
+
+    /** How a processed record was decided; stored as {@code inbox.processing_status}. */
+    enum Decision {
+        APPLIED,
+        STALE,
+        CONFLICT,
+        INVALID
+    }
+
+    /** A received record claimed for processing. */
+    record Pending(UUID id, String messageId, String payload, int attempts) {
     }
 
     record Target(UUID requestId, int lastAppliedSequence, String businessStatus) {
