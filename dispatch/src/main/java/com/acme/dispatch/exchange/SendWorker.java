@@ -2,6 +2,7 @@ package com.acme.dispatch.exchange;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -21,8 +22,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * Sends queued operations to the carrier ({@code docs/dispatch-design.md} §5, D04, D-NF01).
  * <ol>
- *   <li>recover operations whose sender died mid-send ({@code SENDING} past its lease → {@code UNKNOWN}) and close
- *       attempts left open past the lease;</li>
+ *   <li>recover operations whose sender died mid-send ({@code SENDING} past its lease): an attempt with an unknown
+ *       outcome under the same retry policy, so a paused {@code UNKNOWN} or {@code FAILED}; close attempts left
+ *       open past the lease;</li>
  *   <li>claim the next due operation right before sending it, in a short transaction ({@code FOR UPDATE SKIP
  *       LOCKED}, safe with several instances), and open its attempt row — one at a time, so the lease always
  *       measures the call in progress;</li>
@@ -35,8 +37,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class SendWorker {
 
     private static final Logger log = LoggerFactory.getLogger(SendWorker.class);
-    /** Recovered operationIds written to one log line; after a long outage there may be many. */
+    /** Recovered operationIds written to one log line. */
     private static final int LOGGED_IDS = 10;
+    /** The outcome of a send the worker did not live to record. */
+    static final String INTERRUPTED = "Send was interrupted (lease expired)";
 
     private final SendQueueDao queue;
     private final ExchangeAttemptDao attempts;
@@ -84,20 +88,45 @@ public class SendWorker {
         return sent;
     }
 
+    /**
+     * An operation left in {@code SENDING} past its lease is an attempt with an unknown outcome: the same retry
+     * policy as for a timeout decides between a paused retry and {@code FAILED}; the attempt was counted at claim.
+     */
     private void recover() {
         transaction.executeWithoutResult(status -> {
             Instant now = calendar.now();
-            List<UUID> recovered = queue.recoverExpired(now);
-            if (!recovered.isEmpty()) {
-                log.warn("Recovered {} operation(s) left in SENDING after an interrupted send: {}{}", recovered.size(),
-                        recovered.subList(0, Math.min(recovered.size(), LOGGED_IDS)),
-                        recovered.size() > LOGGED_IDS ? " …" : "");
+            List<UUID> rescheduled = new ArrayList<>();
+            List<UUID> failed = new ArrayList<>();
+            for (SendQueueDao.Expired expired : queue.findExpired(now)) {
+                if (retryPolicy.canRetry(expired.attempt())) {
+                    Instant next = now.plus(retryPolicy.backoff(expired.attempt()));
+                    if (queue.rescheduleInterrupted(expired, next, INTERRUPTED, now)) {
+                        rescheduled.add(expired.operationId());
+                    }
+                } else if (queue.failInterrupted(expired,
+                        "Attempts exhausted (" + expired.attempt() + "): " + INTERRUPTED, now)) {
+                    failed.add(expired.operationId());
+                }
+            }
+            if (!rescheduled.isEmpty()) {
+                log.warn("Rescheduled {} operation(s) after an interrupted send: {}", rescheduled.size(),
+                        logged(rescheduled));
+            }
+            if (!failed.isEmpty()) {
+                log.warn("Failed {} operation(s) after an interrupted send, attempts exhausted: {}", failed.size(),
+                        logged(failed));
             }
             int closed = attempts.finishExpired(now, now.minus(properties.lease()));
             if (closed > 0) {
                 log.warn("Closed {} exchange attempt(s) left open past the lease", closed);
             }
         });
+    }
+
+    /** After a long outage there may be many: the first {@link #LOGGED_IDS}, then an ellipsis. */
+    private static String logged(List<UUID> operationIds) {
+        return operationIds.subList(0, Math.min(operationIds.size(), LOGGED_IDS))
+                + (operationIds.size() > LOGGED_IDS ? " …" : "");
     }
 
     /** Claims one due operation and opens its attempt in one short transaction, right before the call. */
