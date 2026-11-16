@@ -38,6 +38,7 @@ export function pendingCard(overrides: Partial<RequestCard> = {}): RequestCard {
     createdAt: '2026-11-12T09:15:03Z',
     updatedAt: '2026-11-12T09:16:00Z',
     version: 1,
+    actions: [],
     ...overrides,
   };
 }

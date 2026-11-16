@@ -8,6 +8,8 @@ import com.acme.dispatch.auth.CurrentUser;
 import com.acme.dispatch.common.BusinessCalendar;
 import com.acme.dispatch.common.web.ApiException;
 import com.acme.dispatch.common.web.PageResponse;
+import com.acme.dispatch.problem.ProblemQueryDao;
+import com.acme.dispatch.problem.ProblemRules;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,10 +20,12 @@ public class RequestQueryService {
 
     private final RequestQueryDao dao;
     private final BusinessCalendar calendar;
+    private final ProblemQueryDao problems;
 
-    public RequestQueryService(RequestQueryDao dao, BusinessCalendar calendar) {
+    public RequestQueryService(RequestQueryDao dao, BusinessCalendar calendar, ProblemQueryDao problems) {
         this.dao = dao;
         this.calendar = calendar;
+        this.problems = problems;
     }
 
     /** One registry page; the page and the total are read in one snapshot. */
@@ -34,7 +38,7 @@ public class RequestQueryService {
     }
 
     /**
-     * The request card as {@code viewer} may see it: the exchange block only for operators.
+     * The request card as {@code viewer} may see it: the exchange block, problems and actions only for operators.
      * A request the viewer may not see is reported exactly like a missing one.
      *
      * @throws ApiException {@code NOT_FOUND} if the request does not exist or is outside the viewer's scope
@@ -45,16 +49,13 @@ public class RequestQueryService {
                 .filter(found -> RequestPermissions.canView(viewer, found.ownerId(), found.serviceId()))
                 .orElseThrow(() -> notFound(id));
         RequestCard card = row.card();
-        return viewer.isOperator() ? card : withoutExchange(card);
+        if (!viewer.isOperator()) {
+            return card.forInitiator();
+        }
+        return card.forOperator(problems.forRequest(id), ProblemRules.requestActions(card.deliveryStatus()));
     }
 
     static ApiException notFound(Object id) {
         return ApiException.notFound("Request " + id + " not found");
-    }
-
-    private static RequestCard withoutExchange(RequestCard c) {
-        return new RequestCard(c.id(), c.number(), c.cargoDescription(), c.weightKg(), c.deliveryAddress(),
-                c.deadline(), c.comment(), c.owner(), c.assignee(), c.businessStatus(), c.result(),
-                c.deliveryStatus(), c.operationId(), c.overdue(), c.createdAt(), c.updatedAt(), c.version(), null);
     }
 }

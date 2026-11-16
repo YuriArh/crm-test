@@ -157,7 +157,7 @@ export interface paths {
         };
         /**
          * Request card
-         * @description `exchange` is present for operators only.
+         * @description `exchange` and `problems` are present for operators only; `actions` is empty for initiators.
          */
         get: operations["getRequest"];
         put?: never;
@@ -172,6 +172,27 @@ export interface paths {
          *     the assignee. Sending the current values changes nothing and does not bump `version`.
          */
         patch: operations["updateRequest"];
+        trace?: never;
+    };
+    "/api/problems": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Problems of the exchange
+         * @description Operators only. Problems of the requests of the caller's service, and problems of carrier records
+         *     that name no known request (every operator sees those). Newest first (`openedAt`, then `id`).
+         */
+        get: operations["listProblems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
 }
@@ -357,6 +378,93 @@ export interface components {
              */
             version: number;
             exchange?: components["schemas"]["ExchangeInfo"];
+            /** @description Operator actions the request's state allows now; always empty for initiators. */
+            actions: components["schemas"]["RequestAction"][];
+            /** @description Problems of the request, open and resolved, newest first. Operators only. */
+            problems?: components["schemas"]["ExchangeProblem"][];
+        };
+        /**
+         * @description `RETRY` — retry the delivery (it is `FAILED` or `UNKNOWN`).
+         * @enum {string}
+         */
+        RequestAction: "RETRY";
+        /**
+         * @description `DELIVERY_UNKNOWN` — unknown whether the carrier got the request (closed by the system once delivery is
+         *     confirmed); `DELIVERY_FAILED` — delivery failed (attempts exhausted or refused); `INVALID_MESSAGE` — the
+         *     carrier sent a record that breaks the contract; `MESSAGE_FAILED` — `dispatch` could not process a record;
+         *     `RESULT_CONFLICT` — a record disagrees with the applied result.
+         * @enum {string}
+         */
+        ProblemKind: "DELIVERY_UNKNOWN" | "DELIVERY_FAILED" | "INVALID_MESSAGE" | "MESSAGE_FAILED" | "RESULT_CONFLICT";
+        /** @enum {string} */
+        ProblemStatus: "OPEN" | "RESOLVED";
+        /**
+         * @description How the problem was closed: `SYSTEM` — by the system (delivery confirmed); `RETRIED` — an operator retried
+         *     the delivery; `APPLY_CARRIER` — an operator applied the disputed record; `KEEP_OURS` — an operator kept the
+         *     applied result; `ACKNOWLEDGED` — an operator looked into the record.
+         * @enum {string}
+         */
+        ProblemDecision: "SYSTEM" | "RETRIED" | "APPLY_CARRIER" | "KEEP_OURS" | "ACKNOWLEDGED";
+        RequestRef: {
+            /** Format: uuid */
+            id: string;
+            number: string;
+        };
+        /**
+         * @description The carrier record behind the problem: the fields that could be read (each `null` when it could not)
+         *     and the beginning of the raw text, with control characters escaped.
+         */
+        ProblemMessage: {
+            messageId: string | null;
+            /** Format: int64 */
+            feedSeq: number | null;
+            status: string | null;
+            sequence: number | null;
+            trackingNumber: string | null;
+            price: number | null;
+            reason: string | null;
+            /** Format: date-time */
+            occurredAt: string | null;
+            payloadExcerpt: string;
+        };
+        /** @description The request's result now, to compare with a disputed record. */
+        CurrentResult: {
+            businessStatus: components["schemas"]["BusinessStatus"];
+            result: components["schemas"]["BusinessResult"] | null;
+        };
+        ExchangeProblem: {
+            /** Format: uuid */
+            id: string;
+            kind: components["schemas"]["ProblemKind"];
+            status: components["schemas"]["ProblemStatus"];
+            /** @description Why it was opened. */
+            details: string;
+            /** Format: date-time */
+            openedAt: string;
+            /** Format: date-time */
+            resolvedAt: string | null;
+            /** @description `null` for a record that names no known request. */
+            request: components["schemas"]["RequestRef"] | null;
+            /** Format: uuid */
+            operationId: string | null;
+            /** @description For `INVALID_MESSAGE`, `MESSAGE_FAILED`, `RESULT_CONFLICT`; otherwise `null`. */
+            message: components["schemas"]["ProblemMessage"] | null;
+            /** @description For `RESULT_CONFLICT`; otherwise `null`. */
+            currentResult: components["schemas"]["CurrentResult"] | null;
+            /** @description The operator who closed it; `null` while open or when the system closed it. */
+            resolvedBy: components["schemas"]["PersonRef"] | null;
+            decision: components["schemas"]["ProblemDecision"] | null;
+            comment: string | null;
+            /** @description Decisions an operator may take now; decided by the server. */
+            actions: components["schemas"]["ProblemDecision"][];
+        };
+        ExchangeProblemPage: {
+            items: components["schemas"]["ExchangeProblem"][];
+            page: number;
+            size: number;
+            /** Format: int64 */
+            totalElements: number;
+            totalPages: number;
         };
     };
     responses: {
@@ -708,6 +816,37 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+        };
+    };
+    listProblems: {
+        parameters: {
+            query?: {
+                /** @description `ALL` — open and resolved. */
+                status?: "OPEN" | "RESOLVED" | "ALL";
+                /** @description One or more kinds (`kind=A&kind=B`); every kind when omitted. */
+                kind?: components["schemas"]["ProblemKind"][];
+                /** @description Page number, from 0. */
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of problems. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExchangeProblemPage"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
         };
     };
 }
