@@ -115,7 +115,7 @@ public class InboxProcessor {
                 message)) {
             case APPLIED -> {
                 inbox.applyToRequest(target.get().requestId(), message, now);
-                inbox.applyToOperation(message.operationId(), message.sequence(), now);
+                inbox.applyToOperation(message.operationId(), message.sequence(), record.id(), now);
                 inbox.recordOutcome(record.id(), Decision.APPLIED, null, message);
             }
             case STALE -> inbox.recordOutcome(record.id(), Decision.STALE, "Sequence " + message.sequence()
