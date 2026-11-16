@@ -42,7 +42,204 @@ class SchemaMigrationTests {
     @Test
     void allMigrationsAreApplied() {
         assertThat(Arrays.stream(flyway.info().applied()).map(MigrationInfo::getVersion).map(Object::toString))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
+    }
+
+    @Test
+    void problemKindMustBeKnown() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertProblem("LOST", "OPEN", request, null, null, null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_kind_valid");
+    }
+
+    @Test
+    void problemStatusMustBeKnown() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertProblem("DELIVERY_UNKNOWN", "CLOSED", request, null, null, null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_status_valid");
+    }
+
+    @Test
+    void problemDecisionMustBeKnown() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertProblem("DELIVERY_FAILED", "RESOLVED", request, null, "IGNORED",
+                NORTH_OPERATOR, "x"))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_decision_valid");
+    }
+
+    @Test
+    void openProblemHasNoResolution() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertProblem("DELIVERY_UNKNOWN", "OPEN", request, null, "SYSTEM", null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_resolution_complete");
+    }
+
+    @Test
+    void resolvedProblemHasDecisionAndTime() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertProblem("DELIVERY_UNKNOWN", "RESOLVED", request, null, null, null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_resolution_complete");
+    }
+
+    @Test
+    void systemDecisionHasNoAuthor() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertProblem("DELIVERY_UNKNOWN", "RESOLVED", request, null, "SYSTEM",
+                NORTH_OPERATOR, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_system_has_no_author");
+    }
+
+    @Test
+    void operatorDecisionHasAuthor() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertProblem("DELIVERY_FAILED", "RESOLVED", request, null, "RETRIED", null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_system_has_no_author");
+    }
+
+    @Test
+    void conflictDecisionNeedsComment() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+        UUID record = insertInboxRecord("CONFLICT");
+
+        assertThatThrownBy(() -> insertProblem("RESULT_CONFLICT", "RESOLVED", request, record, "KEEP_OURS",
+                NORTH_OPERATOR, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_decision_needs_comment");
+    }
+
+    @Test
+    void blankCommentIsRejected() {
+        UUID record = insertInboxRecord("INVALID");
+
+        assertThatThrownBy(() -> insertProblem("INVALID_MESSAGE", "RESOLVED", null, record, "ACKNOWLEDGED",
+                NORTH_OPERATOR, "   "))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_comment_not_blank");
+    }
+
+    @Test
+    void deliveryProblemNeedsRequest() {
+        assertThatThrownBy(() -> insertProblem("DELIVERY_UNKNOWN", "OPEN", null, null, null, null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_source_matches_kind");
+    }
+
+    @Test
+    void deliveryProblemHasNoRecord() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+        UUID record = insertInboxRecord("INVALID");
+
+        assertThatThrownBy(() -> insertProblem("DELIVERY_FAILED", "OPEN", request, record, null, null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_source_matches_kind");
+    }
+
+    @Test
+    void messageProblemNeedsRecord() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertProblem("INVALID_MESSAGE", "OPEN", request, null, null, null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_source_matches_kind");
+    }
+
+    @Test
+    void resultConflictNeedsRequest() {
+        UUID record = insertInboxRecord("CONFLICT");
+
+        assertThatThrownBy(() -> insertProblem("RESULT_CONFLICT", "OPEN", null, record, null, null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_source_matches_kind");
+    }
+
+    @Test
+    void retriedIsOnlyForFailedDelivery() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+        UUID record = insertInboxRecord("CONFLICT");
+
+        assertThatThrownBy(() -> insertProblem("RESULT_CONFLICT", "RESOLVED", request, record, "RETRIED",
+                NORTH_OPERATOR, "x"))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_decision_matches_kind");
+    }
+
+    @Test
+    void conflictDecisionIsOnlyForConflicts() {
+        UUID record = insertInboxRecord("INVALID");
+
+        assertThatThrownBy(() -> insertProblem("INVALID_MESSAGE", "RESOLVED", null, record, "APPLY_CARRIER",
+                NORTH_OPERATOR, "x"))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_decision_matches_kind");
+    }
+
+    @Test
+    void systemDoesNotCloseMessageProblems() {
+        UUID record = insertInboxRecord("INVALID");
+
+        assertThatThrownBy(() -> insertProblem("INVALID_MESSAGE", "RESOLVED", null, record, "SYSTEM", null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_decision_matches_kind");
+    }
+
+    @Test
+    void secondOpenDeliveryProblemOfAKindIsRejected() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+        insertProblem("DELIVERY_UNKNOWN", "OPEN", request, null, null, null, null);
+        insertProblem("DELIVERY_FAILED", "OPEN", request, null, null, null, null);
+
+        assertThatThrownBy(() -> insertProblem("DELIVERY_UNKNOWN", "OPEN", request, null, null, null, null))
+                .isInstanceOf(DuplicateKeyException.class)
+                .hasMessageContaining("problem_open_per_request_kind");
+    }
+
+    @Test
+    void deliveryProblemOpensAgainAfterTheLastOneIsResolved() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+        insertProblem("DELIVERY_UNKNOWN", "RESOLVED", request, null, "SYSTEM", null, null);
+
+        insertProblem("DELIVERY_UNKNOWN", "OPEN", request, null, null, null, null);
+
+        assertThat(count("SELECT count(*) FROM problem WHERE kind = 'DELIVERY_UNKNOWN'")).isEqualTo(2);
+    }
+
+    @Test
+    void secondProblemForARecordIsRejected() {
+        UUID record = insertInboxRecord("INVALID");
+        insertProblem("INVALID_MESSAGE", "RESOLVED", null, record, "ACKNOWLEDGED", NORTH_OPERATOR, "checked");
+
+        assertThatThrownBy(() -> insertProblem("INVALID_MESSAGE", "OPEN", null, record, null, null, null))
+                .isInstanceOf(DuplicateKeyException.class)
+                .hasMessageContaining("problem_per_inbox_record");
+    }
+
+    @Test
+    void problemWithoutRequestIsAccepted() {
+        insertProblem("INVALID_MESSAGE", "OPEN", null, insertInboxRecord("INVALID"), null, null, null);
+
+        assertThat(count("SELECT count(*) FROM problem WHERE request_id IS NULL")).isEqualTo(1);
+    }
+
+    @Test
+    void problemIndexesExist() {
+        assertThat(jdbc.sql("SELECT indexdef FROM pg_indexes WHERE indexname = 'problem_list_idx'")
+                .query(String.class).single()).contains("(status, opened_at DESC)");
+        assertThat(jdbc.sql("SELECT indexdef FROM pg_indexes WHERE indexname = 'problem_request_idx'")
+                .query(String.class).single()).contains("(request_id)");
     }
 
     @Test
@@ -287,6 +484,40 @@ class SchemaMigrationTests {
                 .param("next", nextAttemptAt)
                 .param("now", NOW)
                 .update();
+    }
+
+    private UUID insertInboxRecord(String status) {
+        UUID id = UUID.randomUUID();
+        jdbc.sql("""
+                        INSERT INTO inbox (id, payload, source, processing_status, received_at)
+                        VALUES (:id, '{}', 'RECONCILIATION', :status, :now)""")
+                .param("id", id)
+                .param("status", status)
+                .param("now", NOW)
+                .update();
+        return id;
+    }
+
+    private UUID insertProblem(String kind, String status, UUID requestId, UUID inboxId, String decision,
+                               UUID resolvedBy, String comment) {
+        UUID id = UUID.randomUUID();
+        jdbc.sql("""
+                        INSERT INTO problem (id, kind, status, request_id, inbox_id, details, opened_at, resolved_at,
+                                             resolved_by, decision, comment)
+                        VALUES (:id, :kind, :status, :request, :inbox, 'why', :now, :resolvedAt, :resolvedBy,
+                                :decision, :comment)""")
+                .param("id", id)
+                .param("kind", kind)
+                .param("status", status)
+                .param("request", requestId)
+                .param("inbox", inboxId)
+                .param("now", NOW)
+                .param("resolvedAt", "RESOLVED".equals(status) ? NOW : null)
+                .param("resolvedBy", resolvedBy)
+                .param("decision", decision)
+                .param("comment", comment)
+                .update();
+        return id;
     }
 
     private long count(String sql) {

@@ -9,6 +9,7 @@ public final class TestRows {
     }
 
     public static void deleteRequestData(JdbcClient jdbc) {
+        jdbc.sql("DELETE FROM problem").update();
         jdbc.sql("DELETE FROM idempotency_key").update();
         jdbc.sql("DELETE FROM inbox").update();
         jdbc.sql("DELETE FROM exchange_attempt").update();
