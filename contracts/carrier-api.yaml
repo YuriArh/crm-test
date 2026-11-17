@@ -48,8 +48,10 @@ info:
     **Assumptions.** No authentication: the emulator runs inside the local Docker network. Instants are
     UTC, prices are in rubles.
 
-    The `admin` endpoints belong to the emulator only (fault modes and execution counters for checks);
-    `dispatch` does not call them.
+    The `admin` endpoints belong to the emulator only (fault modes, execution counters and demo scenarios for
+    checks); `dispatch` does not call them. After a scenario changes an operation's result
+    (`PUT /admin/operations/{operationId}/result`), `GET /operations/{operationId}` deliberately differs from the
+    operation's feed entries, as when a real carrier changes its data.
 servers:
   - url: http://localhost:8081
     description: Local emulator
@@ -365,6 +367,72 @@ paths:
         '400':
           $ref: '#/components/responses/ValidationFailed'
 
+  /admin/operations/{operationId}:
+    delete:
+      tags: [admin]
+      operationId: forgetOperation
+      summary: 'Scenario: the carrier loses an operation'
+      description: |
+        Deletes the operation and its feed entries, as if the carrier had lost them. Afterwards
+        `GET /operations/{operationId}` answers `404`, and a new submit of the same `operationId` is received as a
+        new operation and executed. Allowed in any state. For demos and manual checks of reconciliation.
+      parameters:
+        - $ref: '#/components/parameters/OperationIdPath'
+      responses:
+        '204':
+          description: The operation is forgotten.
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '404':
+          $ref: '#/components/responses/OperationNotFound'
+
+  /admin/operations/{operationId}/result:
+    put:
+      tags: [admin]
+      operationId: changeOperationResult
+      summary: 'Scenario: the carrier changes the result of an operation'
+      description: |
+        Replaces the final result of an executed operation, as if the carrier had changed its data. The new result
+        is a new message: it gets a new `messageId`; `sequence` (2) and `executedAt` stay. The feed is not changed —
+        only `GET /operations/{operationId}` shows the new result. Refused with `409 OPERATION_NOT_SETTLED` while the
+        operation is not executed or its feed entries wait for a delayed publication. For demos and manual checks
+        of reconciliation.
+      parameters:
+        - $ref: '#/components/parameters/OperationIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminResultChange'
+            examples:
+              otherPrice:
+                value: {status: SUCCEEDED, trackingNumber: TRK-FFFFFFFF, price: 999.00, reason: null}
+              rejected:
+                value: {status: REJECTED, trackingNumber: null, price: null, reason: Адрес не обслуживается}
+      responses:
+        '200':
+          description: The operation with its new result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminOperation'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '404':
+          $ref: '#/components/responses/OperationNotFound'
+        '409':
+          description: The operation is not executed yet, or its result waits for a delayed publication.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                notSettled:
+                  value:
+                    code: OPERATION_NOT_SETTLED
+                    message: Operation 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f has no settled result to change
+
 components:
   parameters:
     OperationIdPath:
@@ -388,6 +456,17 @@ components:
               value:
                 code: VALIDATION_FAILED
                 message: 'weightKg: must be between 0.1 and 20000'
+    OperationNotFound:
+      description: The carrier does not know this operation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            notFound:
+              value:
+                code: OPERATION_NOT_FOUND
+                message: Operation 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f is not known
     Unavailable:
       description: The carrier is temporarily unavailable; retry later.
       content:
@@ -561,6 +640,25 @@ components:
         malformed:
           type: boolean
 
+    AdminResultChange:
+      type: object
+      description: |
+        A new final result for `PUT /admin/operations/{operationId}/result`, by the rules of `OperationResult`:
+        `SUCCEEDED` has `trackingNumber` and `price` and no `reason`; `REJECTED` has `reason` and neither of the other
+        two.
+      additionalProperties: false
+      required: [status, trackingNumber, price, reason]
+      properties:
+        status:
+          type: string
+          enum: [SUCCEEDED, REJECTED]
+        trackingNumber:
+          $ref: '#/components/schemas/OperationResult/properties/trackingNumber'
+        price:
+          $ref: '#/components/schemas/OperationResult/properties/price'
+        reason:
+          $ref: '#/components/schemas/OperationResult/properties/reason'
+
     AdminOperation:
       type: object
       description: Operation state (see `OperationState`) with its content and execution counters.
@@ -614,6 +712,6 @@ components:
       properties:
         code:
           type: string
-          enum: [VALIDATION_FAILED, PAYLOAD_MISMATCH, OPERATION_NOT_FOUND, UNAVAILABLE]
+          enum: [VALIDATION_FAILED, PAYLOAD_MISMATCH, OPERATION_NOT_FOUND, OPERATION_NOT_SETTLED, UNAVAILABLE]
         message:
           type: string
