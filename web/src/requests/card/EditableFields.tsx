@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { RequestCard } from '@/shared/api';
 import { operatorsQueryOptions } from './api';
 import { COMMENT_MAX_LENGTH, type EditableField } from './edit';
-import { Section } from './parts';
+import { Section } from '@/shared/ui/parts';
 import { NO_ASSIGNEE } from './PropertiesPanel';
 import type { CardEditor } from './useCardEditor';
 

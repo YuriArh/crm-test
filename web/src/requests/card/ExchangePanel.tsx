@@ -2,7 +2,7 @@ import { Stack, Text } from '@mantine/core';
 import type { ExchangeInfo, RequestCard } from '@/shared/api';
 import { useBusinessTimezone } from '@/shared/system';
 import { formatInstant } from '../format';
-import { CopyValue, Property, Section } from './parts';
+import { CopyValue, Property, Section } from '@/shared/ui/parts';
 
 const ACKNOWLEDGED_VIA: Record<NonNullable<ExchangeInfo['acknowledgedVia']>, string> = {
   RESPONSE: 'ответ на отправку',
