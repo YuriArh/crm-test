@@ -75,6 +75,28 @@ export function useRetryDelivery(id: string) {
 }
 
 /**
+ * `POST /api/requests/{id}/reconcile` (operators): ask the carrier now and act as background reconciliation does.
+ * The answer is the recorded check (`ERROR` included). The check may have confirmed the delivery, taken a result
+ * over, opened or closed a problem — so the card, the registry and the problems are stale afterwards.
+ */
+export function useReconcile(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (idempotencyKey: string) =>
+      unwrap(
+        api.POST('/api/requests/{id}/reconcile', {
+          params: { path: { id }, header: { 'Idempotency-Key': idempotencyKey } },
+        }),
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: requestKeys.card(id) });
+      void queryClient.invalidateQueries({ queryKey: requestKeys.lists });
+      void queryClient.invalidateQueries({ queryKey: problemKeys.all });
+    },
+  });
+}
+
+/**
  * `PATCH /api/requests/{id}`: the answer replaces the card in the cache and the lists are marked stale.
  * A refresh in flight is cancelled first, so an older card cannot land on top of the answer.
  */

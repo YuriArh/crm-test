@@ -11,6 +11,7 @@ import { AssigneeField, CommentField, SaveActions } from './EditableFields';
 import { ExchangePanel } from './ExchangePanel';
 import { LeaveGuard } from './LeaveGuard';
 import { PropertiesPanel } from './PropertiesPanel';
+import { ReconcileAction } from './ReconcileAction';
 import { RequestNotFound } from './RequestNotFound';
 import { ResultSection } from './ResultSection';
 import { RetryAction } from './RetryAction';
@@ -57,7 +58,16 @@ export function RequestCardPage({ id }: { id: string }) {
     />
   );
   const exchange = card.exchange ? (
-    <ExchangePanel card={card} exchange={card.exchange} actions={<RetryAction card={card} />} />
+    <ExchangePanel
+      card={card}
+      exchange={card.exchange}
+      actions={
+        <>
+          <RetryAction card={card} />
+          <ReconcileAction card={card} />
+        </>
+      }
+    />
   ) : null;
 
   return (
