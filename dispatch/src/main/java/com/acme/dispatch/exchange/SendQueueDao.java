@@ -121,15 +121,20 @@ public class SendQueueDao {
      * {@code ACKNOWLEDGED} operation the carrier lost ({@code EXTERNAL_MISSING} open) without a result becomes
      * {@code PENDING} and forgets its acknowledgement. The reconciliation schedule starts over. Conditional on that
      * state, the same rule as {@code ProblemRules.canRetry}, so it does nothing to an operation that moved on.
-     * Returns whether it retried.
+     * Returns the delivery status before and after, or empty if it did not retry.
      */
-    public boolean retryByOperator(UUID requestId, Instant now) {
+    public Optional<Retried> retryByOperator(UUID requestId, Instant now) {
         // Lock the operation first: the result handler changes the request's result under this lock, so the
-        // next statement (a fresh snapshot) sees whether the request has a result now.
-        jdbc.sql("SELECT 1 FROM dispatch_operation WHERE request_id = :requestId FOR UPDATE")
+        // next statement (a fresh snapshot) sees whether the request has a result now. The status read under the
+        // lock is the one the retry changes.
+        Optional<String> before = jdbc.sql("""
+                        SELECT delivery_status FROM dispatch_operation WHERE request_id = :requestId FOR UPDATE""")
                 .param("requestId", requestId)
-                .query(Integer.class)
+                .query(String.class)
                 .optional();
+        if (before.isEmpty()) {
+            return Optional.empty();
+        }
         return jdbc.sql("""
                         UPDATE dispatch_operation o
                            SET delivery_status = CASE o.delivery_status WHEN 'UNKNOWN' THEN 'UNKNOWN'
@@ -144,10 +149,16 @@ public class SendQueueDao {
                                     AND r.business_status NOT IN ('SUCCEEDED', 'REJECTED')
                                     AND EXISTS (SELECT 1 FROM problem p
                                                  WHERE p.request_id = o.request_id AND p.status = 'OPEN'
-                                                   AND p.kind = 'EXTERNAL_MISSING')))""")
+                                                   AND p.kind = 'EXTERNAL_MISSING')))
+                        RETURNING o.delivery_status""")
                 .param("now", toSql(now))
                 .param("requestId", requestId)
-                .update() == 1;
+                .query((rs, row) -> new Retried(before.get(), rs.getString("delivery_status")))
+                .optional();
+    }
+
+    /** The delivery status an operator's retry found and left. */
+    public record Retried(String from, String to) {
     }
 
     /** The carrier confirmed receipt. */

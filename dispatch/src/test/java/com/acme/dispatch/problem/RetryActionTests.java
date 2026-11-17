@@ -32,6 +32,7 @@ import com.acme.dispatch.request.RequestCard;
 import com.acme.dispatch.support.FakeCarrier;
 import com.acme.dispatch.support.IntegrationTest;
 import com.acme.dispatch.support.MutableClock;
+import com.acme.dispatch.support.TestEvents;
 import com.acme.dispatch.support.TestRequests;
 import com.acme.dispatch.support.TestResults;
 import com.acme.dispatch.support.TestRows;
@@ -312,6 +313,66 @@ class RetryActionTests {
         mvc.perform(post("/api/requests/{id}/retry", "not-an-id").header("Idempotency-Key", "k-1").with(csrf())
                         .with(asUser(users, NORTH_OPERATOR_LOGIN)))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void retryFromFailedIsRecorded() throws Exception {
+        RequestCard request = failed();
+
+        retry(request, "k-1").andExpect(status().isOk());
+
+        assertThat(TestEvents.of(jdbc, request.id()))
+                .containsExactly("DELIVERY_RETRIED v- by " + NORTH_OPERATOR + " [deliveryStatus: FAILED → PENDING]");
+    }
+
+    @Test
+    void retryFromUnknownIsRecorded() throws Exception {
+        RequestCard request = requests.create("1");
+        carrier.answer(TIMEOUT);
+        worker.runOnce();
+
+        retry(request, "k-1").andExpect(status().isOk());
+
+        assertThat(TestEvents.of(jdbc, request.id()))
+                .containsExactly("DELIVERY_RETRIED v- by " + NORTH_OPERATOR + " [deliveryStatus: UNKNOWN → UNKNOWN]");
+    }
+
+    @Test
+    void retryOfLostOperationIsRecorded() throws Exception {
+        RequestCard request = requests.create("1");
+        worker.runOnce();
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+
+        retry(request, "k-1").andExpect(status().isOk());
+
+        assertThat(TestEvents.of(jdbc, request.id())).containsExactly(
+                "DELIVERY_RETRIED v- by " + NORTH_OPERATOR + " [deliveryStatus: ACKNOWLEDGED → PENDING]");
+    }
+
+    @Test
+    void replayedRetryIsNotRecorded() throws Exception {
+        RequestCard request = failed();
+        retry(request, "k-1").andExpect(status().isOk());
+
+        retry(request, "k-1").andExpect(header().string("Idempotent-Replayed", "true"));
+
+        assertThat(TestEvents.of(jdbc, request.id())).hasSize(1);
+    }
+
+    @Test
+    void refusedRetryIsNotRecorded() throws Exception {
+        RequestCard request = requests.create("1");
+
+        expectRefused(request, "PENDING");
+
+        assertThat(TestEvents.of(jdbc, request.id())).isEmpty();
+    }
+
+    @Test
+    void retryDoesNotChangeTheVersion() throws Exception {
+        RequestCard request = failed();
+
+        retry(request, "k-1").andExpect(status().isOk()).andExpect(jsonPath("$.version").value(0));
     }
 
     private RequestCard failed() {
