@@ -131,6 +131,16 @@ public class ProblemDao {
                 .update() == 1;
     }
 
+    /** The carrier's answer a reconciliation conflict shows now (its linked check), if it is one. */
+    public Optional<String> carrierAnswerOf(UUID problemId) {
+        return jdbc.sql("""
+                        SELECT r.carrier_response FROM problem p JOIN reconciliation r ON r.id = p.reconciliation_id
+                         WHERE p.id = :id AND r.carrier_response IS NOT NULL""")
+                .param("id", problemId)
+                .query(String.class)
+                .optional();
+    }
+
     /** The record a problem is about, if it is a record problem. */
     public Optional<UUID> recordOf(UUID problemId) {
         return jdbc.sql("SELECT inbox_id FROM problem WHERE id = :id AND inbox_id IS NOT NULL")

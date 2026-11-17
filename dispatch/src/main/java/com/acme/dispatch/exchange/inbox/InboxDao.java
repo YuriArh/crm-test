@@ -35,6 +35,14 @@ public class InboxDao {
                 .update() == 1;
     }
 
+    /** Locks a record until the transaction ends, waiting for a processor that holds it. */
+    void lockRecord(UUID inboxId) {
+        jdbc.sql("SELECT id FROM inbox WHERE id = :id FOR UPDATE")
+                .param("id", inboxId)
+                .query(UUID.class)
+                .single();
+    }
+
     /** How a record stands now. */
     public String statusOf(UUID inboxId) {
         return jdbc.sql("SELECT processing_status FROM inbox WHERE id = :id")

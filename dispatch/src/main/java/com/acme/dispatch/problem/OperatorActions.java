@@ -65,10 +65,11 @@ public class OperatorActions {
     }
 
     /**
-     * Decides on a problem: «принять результат перевозчика» ({@code APPLY_CARRIER}) or «оставить наш»
-     * ({@code KEEP_OURS}) for a result conflict, «Разобрано» ({@code ACKNOWLEDGED}) for a record problem. The
-     * decision must be one of the problem's actions. {@code APPLY_CARRIER} locks the operation row first, then closes
-     * the problem — the lock order of the exchange (operation before problem). Closing is conditional on the problem
+     * Decides on a problem: «принять версию перевозчика» ({@code APPLY_CARRIER}) or «оставить наш»
+     * ({@code KEEP_OURS}) for a result or reconciliation conflict, «оставить наш» for a lost operation that has a
+     * result, «Разобрано» ({@code ACKNOWLEDGED}) for a record problem. The decision must be one of the problem's
+     * actions. {@code APPLY_CARRIER} locks the operation row first (after the carrier's record, as the result
+     * handler does), then closes the problem — the lock order of the exchange (operation before problem). Closing is conditional on the problem
      * being open, so of two concurrent decisions one wins and the other is {@code 409}. Returns the problem after it.
      */
     @Transactional
@@ -86,7 +87,7 @@ public class OperatorActions {
                     }
                     Instant now = calendar.now();
                     if (body.decision() == ProblemDecision.APPLY_CARRIER) {
-                        results.applyChosen(problems.recordOf(problemId).orElseThrow(), now);
+                        applyCarrier(problem, now);
                     }
                     if (!problems.closeById(problemId, body.decision(), user.id(), body.comment(), now)) {
                         throw invalidDecision(problem, body.decision());
@@ -116,6 +117,23 @@ public class OperatorActions {
                     return new IdempotentResponse<>(200,
                             reconciliations.find(checked.reconciliationId()).orElseThrow(), requestId);
                 });
+    }
+
+    /**
+     * Replaces the request's result with the carrier's: the disputed feed record of a result conflict, or the
+     * carrier's answer a reconciliation conflict shows now — which may have changed since the operator saw it, so a
+     * missing final result there is {@code 409}.
+     */
+    private void applyCarrier(ExchangeProblem problem, Instant now) {
+        if (problem.kind() == ProblemKind.RECONCILIATION_CONFLICT) {
+            String answer = problems.carrierAnswerOf(problem.id()).orElse(null);
+            if (answer == null || !results.applyCarrierAnswer(answer,
+                    "Applied by operator decision " + problem.id(), now)) {
+                throw invalidDecision(problem, ProblemDecision.APPLY_CARRIER);
+            }
+            return;
+        }
+        results.applyChosen(problems.recordOf(problem.id()).orElseThrow(), now);
     }
 
     private static ApiException invalidDecision(ExchangeProblem problem, ProblemDecision decision) {
