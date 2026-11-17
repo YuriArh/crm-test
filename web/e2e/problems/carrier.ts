@@ -41,6 +41,33 @@ export async function waitForReceipt(operationId: string, timeoutMs = 30_000): P
   }
 }
 
+type AdminOperation = { state: string; resultPublishAt: string | null };
+
+/**
+ * Waits until the emulator has executed the operation but holds its result back (`delayed`): `state = EXECUTED`
+ * and `resultPublishAt` still set — the window in which reconciliation knows more than the feed.
+ */
+export async function waitForDeferredResult(operationId: string, timeoutMs = 30_000): Promise<void> {
+  const carrier = await playwrightRequest.newContext({ baseURL: CARRIER_BASE_URL });
+  try {
+    const until = Date.now() + timeoutMs;
+    while (Date.now() < until) {
+      const response = await carrier.get('/admin/operations', { params: { operationId } });
+      const [operation] = ((await response.json()) as { items: AdminOperation[] }).items;
+      if (operation?.state === 'EXECUTED') {
+        if (operation.resultPublishAt === null) {
+          throw new Error(`the carrier published the result of ${operationId} already: the delayed window is gone`);
+        }
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    throw new Error(`the carrier did not execute operation ${operationId} in ${timeoutMs} ms`);
+  } finally {
+    await carrier.dispose();
+  }
+}
+
 /** Skips the test, with the reason, when the emulator cannot be reached (no stand running). */
 export async function requireCarrier(): Promise<void> {
   const carrier = await playwrightRequest.newContext({ baseURL: CARRIER_BASE_URL });

@@ -320,32 +320,108 @@
 
 ## Этап B (после влития `reconciliation`)
 
-### Шаг B1. Типы и новые виды
+Основание — части B спеки §0, §4.1, §7.1–§7.2, §8.1–§8.4, §10 (уточнены 17.11.2026, решения Q25, Q26). Только web:
+сервер, контракт и типы готовы (`reconciliation` в `main`, `pnpm api:check` зелёный). Ветка `web-reconciliation`
+от `main`. TDD и правило «один шаг — один коммит» — как в этапе A; в каждом шаге тесты сначала красные **по нужной
+причине**.
 
-- `make web-api-types`; псевдонимы `Reconciliation`; тестовые данные: `actions` с `RECONCILE`, `reconciliations`.
-- **Тесты:** `labels.test.ts` — новые виды (тест по `satisfies Record` сам станет красным при появлении значений);
-  `ProblemDetails.test.tsx` — `RECONCILIATION_CONFLICT` с итогом перевозчика и без («У перевозчика итога ещё нет»),
-  `EXTERNAL_MISSING` с итогом и без; `RetryAction.test.tsx` — текст для `ACKNOWLEDGED` + `EXTERNAL_MISSING`.
+**Исходное состояние web** (проверено 17.11.2026): `KIND_VIEWS` уже содержит `EXTERNAL_MISSING` и
+`RECONCILIATION_CONFLICT` (пояснение второго — старое); `ConflictView` умеет «У перевозчика итога ещё нет», но
+`ProblemDetails` показывает блок конфликта только для `RESULT_CONFLICT` (`CONFLICTS`); «Наш итог» у
+`EXTERNAL_MISSING` не показывается; `RetryAction` для `ACKNOWLEDGED` берёт текст `FAILED`; в карточке «Повторить»
+стоит только в плашках `DELIVERY_*` (`RequestCardPage.tsx`, `DELIVERY_KINDS`); `RECONCILE` и `reconciliations`
+нигде не используются. В тестовых данных карточки (`testData.ts`) у оператора `actions` без `RECONCILE`.
+
+### Шаг B0. Ветка и статус
+
+- Ветка `web-reconciliation` от `main`. Спека и этот план — первым docs-коммитом (если ещё не в `main`).
+- Тестовые данные: у карточки оператора `actions: ['RECONCILE']` по умолчанию (как шлёт сервер) и
+  `reconciliations: []`; фикстура проверки сверки `reconciliation(overrides)` (новый id на каждый вызов) в
+  `requests/card/testData.ts`.
+- **Тесты:** нет новых; существующие остаются зелёными (кнопки `RECONCILE` ещё никто не рисует).
 - **Гейт:** `make web-build`.
 
-### Шаг B2. «Сверить сейчас»
+### Шаг B1. Новые виды в деталях проблемы
 
-- **Тесты:** `ReconcileAction.test.tsx` — кнопка только при `RECONCILE`; без окна; ключ новый на каждое нажатие,
-  тот же после обрыва; исходы словом и цветом, `acknowledged`; `ERROR` — обычный ответ; карточка перезапрошена;
-  `404`/`403`/`422` по §8.5.
-- **Код:** `card/ReconcileAction.tsx`, `useReconcile(id)`.
+- **Тесты (красные):**
+  - `labels.test.ts` — пояснение `RECONCILIATION_CONFLICT`: «…или итог есть только у нас» (§4.1);
+  - `ProblemDetails.test.tsx` — `RECONCILIATION_CONFLICT`: блок конфликта с итогом перевозчика (различия отмечены)
+    и без него («У перевозчика итога ещё нет»; «Наш итог» на месте); `EXTERNAL_MISSING`: «Наш итог» из
+    `currentResult` и «Итога нет»; блока сообщения перевозчика у обоих нет.
+- **Код:** `labels.ts` — пояснение; `ProblemDetails` — `RECONCILIATION_CONFLICT` в `CONFLICTS`; для
+  `EXTERNAL_MISSING` — раздел «Наш итог» (общая часть с правой колонкой `ConflictView`, без дублирования).
 - **Гейт:** `make web-build`.
 
-### Шаг B3. История сверок
+### Шаг B2. «Повторить» при `EXTERNAL_MISSING` и тексты решений
 
-- **Тесты:** `ReconciliationHistory.test.tsx` — до 20 строк, новые первыми; запуск словами, «вручную · Иванов»;
-  раскрытие с `details` и итогом перевозчика; у инициатора нет.
+- **Тесты (красные):**
+  - `RetryAction.test.tsx` — `ACKNOWLEDGED` + `RETRY`: текст «Перевозчик потерял операцию. Отправим её заново с тем
+    же идентификатором» (§8.1);
+  - `RequestCardPage.test.tsx` — в плашке `EXTERNAL_MISSING` «Повторить отправку» при `RETRY` и нет без него;
+    в плашках `DELIVERY_*` по-прежнему есть; «Сверить сейчас» нет ни в одной плашке (Q25);
+  - `ResolveModal.test.tsx` — `KEEP_OURS` для `RECONCILIATION_CONFLICT`: «Сверка запомнит решение…»; для
+    `EXTERNAL_MISSING`: «Потерю операции перевозчиком вы разбираете с ним сами»; для `RESULT_CONFLICT` — прежний
+    текст (§8.2, Q26).
+- **Код:** `RetryAction` — текст для `ACKNOWLEDGED`; `RequestCardPage` — `EXTERNAL_MISSING` в наборе видов с
+  повтором; `ResolveModal` — текст последствий по паре (вид, решение).
 - **Гейт:** `make web-build`.
 
-### Шаг B4. E2E и документы
+### Шаг B3. Слова сверки
 
-- Playwright (обычный проект): заявка с итогом, «Сверить сейчас» → «Совпадает», проверка в истории.
-- `CLAUDE.md`, README, `manual-testing.md`; полный гейт.
+- **Тесты (красные):** `requests/card/reconciliation.test.ts` — слово и цвет для каждого `outcome`, слово для каждого
+  `trigger` и `carrierState` контракта, включая `null` («Не ответил»); запуск `MANUAL` с автором — «вручную ·
+  Иванов»; тип `Record<…>` по перечислениям контракта, так что новое значение сервера ломает компиляцию.
+- **Код:** `requests/card/reconciliation.ts` (§8.3).
+- **Гейт:** `make web-build`.
+
+### Шаг B4. «Сверить сейчас»
+
+- **Тесты (красные):** `ReconcileAction.test.tsx` (компонентный, `renderApp` карточки оператора, MSW):
+  - кнопка в панели «Обмен с перевозчиком» только при `RECONCILE`; у инициатора её нет;
+  - нажатие без окна; пока ответа нет — кнопка в загрузке и не нажимается повторно (один запрос);
+  - `200`: под кнопкой исход словом и цветом, «· получение подтверждено» при `acknowledged`, `details`, время
+    `checkedAt` в бизнес-зоне; область `aria-live`; фокус на кнопке;
+  - `ERROR` в ответе — обычный итог, не ошибка;
+  - после ответа перезапрошены карточка, список проблем, счётчик шапки и реестр (`invalidateQueries` по их ключам);
+  - ключи: два нажатия — два разных `Idempotency-Key`; обрыв, затем повтор — тот же ключ; после `2xx`/`4xx` —
+    новый;
+  - ошибки под кнопкой по §8.5: обрыв/`5xx`, `403`, `422` (новый ключ, «Повторите действие»), `400
+    IDEMPOTENCY_KEY_*`; `404` — страница «Заявка не найдена», как у повтора.
+- **Код:** `useReconcile(id)` в `card/api.ts` (`POST /api/requests/{id}/reconcile` через `@/shared/api`, ключ —
+  `useActionKeys` по номеру нажатия, разбор ошибок — `describeActionFailure`); `card/ReconcileAction.tsx`; панель
+  обмена получает его рядом с `RetryAction`.
+- **Гейт:** `make web-build`.
+
+### Шаг B5. История сверок
+
+- **Тесты (красные):** `ReconciliationHistory.test.tsx` — строки в порядке ответа (новые первыми); время в
+  бизнес-зоне, запуск словами, «вручную · Иванов», исход словом и цветом, `details` в строке; раскрытие с клавиатуры
+  (Tab, Enter) — `details` целиком, ответ перевозчика словами, его итог (статус, номер, стоимость, причина, время,
+  `sequence`, `messageId`); без итога перевозчика — без блока итога; пустой список — «Сверок ещё не было»; у
+  инициатора раздела нет. `phone.test.tsx` — раздел помещается в 390 px без горизонтальной прокрутки.
+- **Код:** `card/ReconciliationHistory.tsx` (`Accordion`), раздел «Сверки» в `ExchangePanel`.
+- **Гейт:** `make web-build`.
+
+### Шаг B6. Playwright
+
+- `web/e2e/requests/` (проект `chromium`): оператор, заявка с итогом → «Сверить сейчас» → «Совпадает», первая строка
+  истории — «вручную · <оператор>».
+- `web/e2e/problems/faults.spec.ts` (проект `faults`): `delayed`; заявка создана через API; ждём, пока эмулятор
+  исполнил операцию, а итог ещё не в ленте (`carrier.ts` получает `waitForDeferredResult(operationId)` рядом с
+  `waitForReceipt`: admin-операция исполнена, `resultPublishAt` не пуст); «Сверить
+  сейчас» → «Итог получен сверкой», итог в карточке сразу; после публикации в ленте (на стенде задержка 15 с) итог
+  прежний. Приём — как в Java `ReconciliationE2ETest`. Если окно в 15 с на dev-сервере окажется мало, задержка
+  передаётся стенду через `CARRIER_DELAYED_RESULT_DELAY`, а не через ожидание в тесте.
+- **Гейт:** `make up && make web-e2e`.
+
+### Шаг B7. Документы и полный гейт
+
+- Спека: статус «часть B реализована», отличия реализации — в §13.
+- `CLAUDE.md` (`src/requests/card/`: «Сверить сейчас», история сверок), README (раздел для оператора),
+  `docs/manual-testing.md` (ручная проверка: «Совпадает», «Итог получен сверкой» через `make fault-delayed`;
+  конфликты — по `docs/specs/demo-seed.md`).
+- Полный гейт: `./gradlew build`, `make up && make e2e`, `make contracts-lint`, `make web-build`, `make web-e2e`;
+  обе схемы и 390 px — глазами.
 
 ## Риски
 

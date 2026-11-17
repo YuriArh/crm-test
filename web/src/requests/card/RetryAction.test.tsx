@@ -3,7 +3,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
-import { deliveryFailed, deliveryUnknown } from '@/problems/fixtures';
+import { deliveryFailed, deliveryUnknown, externalMissing, reconciliationConflict } from '@/problems/fixtures';
 import type { RequestCard } from '@/shared/api';
 import { problem, server } from '@/test/server';
 import { renderApp } from '@/test/renderApp';
@@ -68,6 +68,36 @@ describe('retrying the delivery', () => {
     serveOperators();
     renderApp(cardPath, { me: demoOperator });
     expect(await openRetry(user)).toHaveTextContent('останется открытой, пока перевозчик не подтвердит получение');
+  });
+
+  it('offers a retry in the notice of an operation the carrier lost, and explains it is sent again as it was', async () => {
+    const user = userEvent.setup();
+    serveCard(failedCard({ deliveryStatus: 'ACKNOWLEDGED', problems: [externalMissing()] }));
+    serveOperators();
+    renderApp(cardPath, { me: demoOperator });
+
+    const problems = await screen.findByRole('region', { name: 'Проблемы' });
+    await user.click(within(problems).getByRole('button', { name: 'Повторить отправку' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Повторить отправку заявки DR-000123?' });
+    expect(dialog).toHaveTextContent('Перевозчик потерял операцию. Отправим её заново с тем же идентификатором');
+  });
+
+  it('offers no retry in the notice of a lost operation once dispatch stops offering it (we have a result)', async () => {
+    serveCard(failedCard({ deliveryStatus: 'ACKNOWLEDGED', actions: [], problems: [externalMissing({ actions: ['KEEP_OURS'] })] }));
+    serveOperators();
+    renderApp(cardPath, { me: demoOperator });
+
+    const problems = await screen.findByRole('region', { name: 'Проблемы' });
+    expect(within(problems).queryByRole('button', { name: 'Повторить отправку' })).not.toBeInTheDocument();
+  });
+
+  it('never puts «Сверить сейчас» into a problem’s notice: it lives in the exchange panel only', async () => {
+    serveCard(failedCard({ deliveryStatus: 'UNKNOWN', problems: [deliveryUnknown(), externalMissing(), reconciliationConflict()] }));
+    serveOperators();
+    renderApp(cardPath, { me: demoOperator });
+
+    const problems = await screen.findByRole('region', { name: 'Проблемы' });
+    expect(within(problems).queryByRole('button', { name: 'Сверить сейчас' })).not.toBeInTheDocument();
   });
 
   it('retries with a key, shows the card from the answer and says so', async () => {

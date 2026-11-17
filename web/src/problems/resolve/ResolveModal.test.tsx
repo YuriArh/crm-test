@@ -7,13 +7,21 @@ import { CARD_ID, cardPath, demoOperator, pendingCard, serveCard, serveOperators
 import type { ExchangeProblem, RequestCard, UpdateRequest } from '@/shared/api';
 import { problem, server } from '@/test/server';
 import { renderApp } from '@/test/renderApp';
-import { invalidMessage, resultConflict } from '../fixtures';
+import { externalMissing, invalidMessage, reconciliationConflict, resultConflict } from '../fixtures';
 
 type User = ReturnType<typeof userEvent.setup>;
 
 // One problem per kind for the whole file: every fixture call makes a new id.
 const conflict = resultConflict();
 const record = invalidMessage();
+const reconciliation = reconciliationConflict();
+const lost = externalMissing({
+  currentResult: {
+    businessStatus: 'SUCCEEDED',
+    result: { trackingNumber: 'TRK-00000001', price: 325, rejectionReason: null, resultAt: '2026-11-17T11:00:00Z' },
+  },
+  actions: ['KEEP_OURS'],
+});
 const operator = { id: demoOperator.id, displayName: 'Оператор (Север)' };
 
 function closed(p: ExchangeProblem, decision: ExchangeProblem['decision'], comment: string): ExchangeProblem {
@@ -50,6 +58,44 @@ describe('deciding on a problem', () => {
     expect(within(dialog).getByText(/Итог заявки будет заменён версией перевозчика/)).toBeInTheDocument();
     expect(within(dialog).getByRole('region', { name: 'Версия перевозчика' })).toBeInTheDocument();
     expect(within(dialog).getByRole('region', { name: 'Наш итог' })).toBeInTheDocument();
+  });
+
+  it('keeping ours in a reconciliation conflict says reconciliation remembers it, and shows both versions', async () => {
+    const user = userEvent.setup();
+    serveCard(withExchange(succeededCard({ problems: [reconciliation] })));
+    serveOperators();
+    renderApp(cardPath, { me: demoOperator });
+
+    const dialog = await openDecision(user, 'Оставить наш итог');
+    expect(dialog).toHaveTextContent('Итог заявки не изменится.');
+    expect(dialog).toHaveTextContent(
+      'Сверка запомнит решение: этот же ответ перевозчика проблему больше не откроет, другой ответ или смена нашего итога — откроет снова',
+    );
+    expect(within(dialog).getByRole('region', { name: 'Версия перевозчика' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('region', { name: 'Наш итог' })).toBeInTheDocument();
+  });
+
+  it('keeping ours for a lost operation says the operator sorts it out with the carrier', async () => {
+    const user = userEvent.setup();
+    serveCard(withExchange(succeededCard({ problems: [lost] })));
+    serveOperators();
+    renderApp(cardPath, { me: demoOperator });
+
+    const dialog = await openDecision(user, 'Оставить наш итог');
+    expect(dialog).toHaveTextContent('Итог заявки не изменится.');
+    expect(dialog).toHaveTextContent('Потерю операции перевозчиком вы разбираете с ним сами');
+  });
+
+  it('keeping ours in a feed conflict says only that the result stays', async () => {
+    const user = userEvent.setup();
+    serveCard(withExchange(succeededCard({ problems: [conflict] })));
+    serveOperators();
+    renderApp(cardPath, { me: demoOperator });
+
+    const dialog = await openDecision(user, 'Оставить наш итог');
+    expect(dialog).toHaveTextContent('Итог заявки не изменится.');
+    expect(dialog).not.toHaveTextContent('Сверка запомнит');
+    expect(dialog).not.toHaveTextContent('Потерю операции');
   });
 
   it('does not send without a comment', async () => {

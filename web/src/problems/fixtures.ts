@@ -104,6 +104,36 @@ export function resultConflict(overrides: Partial<ExchangeProblem> = {}): Exchan
   });
 }
 
+/** Reconciliation: the carrier's latest answer differs from our result (`feedSeq` is `null`, it is not a feed record). */
+export function reconciliationConflict(overrides: Partial<ExchangeProblem> = {}): ExchangeProblem {
+  return base({
+    kind: 'RECONCILIATION_CONFLICT',
+    details: 'The carrier has another result',
+    message: {
+      messageId: '0195f3a2-1111-7000-8000-000000000003',
+      feedSeq: null,
+      status: 'REJECTED',
+      sequence: 2,
+      trackingNumber: null,
+      price: null,
+      reason: 'Адрес вне зоны доставки',
+      occurredAt: '2026-11-17T11:06:00Z',
+      payloadExcerpt: '{"state":"EXECUTED"}',
+    },
+    currentResult: {
+      businessStatus: 'SUCCEEDED',
+      result: { trackingNumber: 'TRK-00000001', price: 325, rejectionReason: null, resultAt: '2026-11-17T11:00:00Z' },
+    },
+    actions: ['APPLY_CARRIER', 'KEEP_OURS'],
+    ...overrides,
+  });
+}
+
+/** Reconciliation: the carrier does not know an operation it acknowledged; we have no result, so a retry fixes it. */
+export function externalMissing(overrides: Partial<ExchangeProblem> = {}): ExchangeProblem {
+  return base({ kind: 'EXTERNAL_MISSING', details: 'The carrier answered 404 for an acknowledged operation', ...overrides });
+}
+
 /** Closed by an operator. */
 export function resolvedByOperator(overrides: Partial<ExchangeProblem> = {}): ExchangeProblem {
   return resultConflict({

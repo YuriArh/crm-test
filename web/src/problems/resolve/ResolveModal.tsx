@@ -23,7 +23,16 @@ const TEXTS = {
   gone: 'Проблема недоступна',
 };
 
-const CONFLICTS = new Set<string>(['RESULT_CONFLICT']);
+/** What else follows from a decision on this kind (web-problems.md §8.2). */
+const KIND_CONSEQUENCES: Partial<Record<string, Partial<Record<ProblemDecision, string>>>> = {
+  RECONCILIATION_CONFLICT: {
+    KEEP_OURS:
+      'Сверка запомнит решение: этот же ответ перевозчика проблему больше не откроет, другой ответ или смена нашего итога — откроет снова.',
+  },
+  EXTERNAL_MISSING: { KEEP_OURS: 'Потерю операции перевозчиком вы разбираете с ним сами.' },
+};
+
+const CONFLICTS = new Set<string>(['RESULT_CONFLICT', 'RECONCILIATION_CONFLICT']);
 
 type Intent = { problemId: string; decision: ProblemDecision; comment: string };
 const fingerprint = (intent: Intent) => JSON.stringify([intent.problemId, intent.decision, intent.comment]);
@@ -88,7 +97,9 @@ export function ResolveModal({ problem, decision, onClose }: Props) {
     <Modal opened onClose={close} title={title} centered size="lg">
       <form onSubmit={submit} noValidate>
         <Stack gap="md">
-          <Text size="sm">{CONSEQUENCES[decision]}</Text>
+          <Text size="sm">
+            {[CONSEQUENCES[decision], KIND_CONSEQUENCES[problem.kind]?.[decision]].filter(Boolean).join(' ')}
+          </Text>
           {CONFLICTS.has(problem.kind) && <ConflictView message={problem.message} current={problem.currentResult} />}
           <Textarea
             label="Комментарий"

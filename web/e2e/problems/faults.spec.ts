@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { signInViaApi } from '../auth/helpers';
 import { createRequestViaApi, uniqueCargo } from '../requests/helpers';
-import { allFaultsOff, requireCarrier, setFaults, waitForReceipt } from './carrier';
+import { allFaultsOff, requireCarrier, setFaults, waitForDeferredResult, waitForReceipt } from './carrier';
 
 // Problems from real emulator faults (web-problems.md §10.4). The switches are global, so this file runs in the
 // `faults` project: after every other test, one test at a time, every switch off before and after each test.
@@ -86,6 +86,36 @@ test('a broken carrier record is found in the problems list and acknowledged in 
   await page.goto('/requests?problems=1');
   await expect(page.getByRole('heading', { name: 'Заявки', level: 2 })).toBeVisible();
   await expect(page.getByRole('row').filter({ hasText: request.number })).toHaveCount(0);
+});
+
+test('«Сверить сейчас» takes over a result the carrier has not published yet', async ({ page }) => {
+  test.setTimeout(2 * SYSTEM_TIMEOUT);
+  // delayed: the carrier executes at once but holds the result back from its feed (15 s on the stand).
+  // The mode is remembered per operation at its first receipt, so it is switched off once the carrier has it.
+  await setFaults({ delayed: true });
+  const request = await createRequestViaApi(page, 'north.initiator', { cargoDescription: uniqueCargo('Сверка задержка') });
+  const card = (await (await page.request.get(`/api/requests/${request.id}`)).json()) as { operationId: string };
+  await waitForReceipt(card.operationId);
+  await setFaults({});
+  await signInViaApi(page, 'north.operator');
+  await page.goto(`/requests/${request.id}`);
+  const exchange = page.getByRole('region', { name: 'Обмен с перевозчиком' });
+  await expect(exchange).toBeVisible();
+  await waitForDeferredResult(card.operationId);
+
+  await exchange.getByRole('button', { name: 'Сверить сейчас' }).click();
+
+  await expect(exchange.getByRole('status')).toContainText('Итог получен сверкой');
+  const result = page.getByRole('region', { name: 'Результат' });
+  await expect(result.getByText('Номер отправления')).toBeVisible();
+  const tracking = await result.getByText(/^TRK-/).textContent();
+  await expect(page.getByRole('region', { name: 'Сверки' }).getByRole('button').first()).toContainText('Итог получен сверкой');
+
+  // The feed brings the same result later: it changes nothing.
+  await page.waitForTimeout(25_000);
+  await page.reload();
+  await expect(result.getByText(tracking!)).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Проблемы' })).toHaveCount(0);
 });
 
 test('a lost answer shows «unknown whether received» in the card until the system closes it', async ({ page }) => {

@@ -4,6 +4,7 @@ import type { ExchangeInfo, RequestCard } from '@/shared/api';
 import { useBusinessTimezone } from '@/shared/system';
 import { formatInstant } from '../format';
 import { CopyValue, Property, Section } from '@/shared/ui/parts';
+import { ReconciliationHistory } from './ReconciliationHistory';
 
 const ACKNOWLEDGED_VIA: Record<NonNullable<ExchangeInfo['acknowledgedVia']>, string> = {
   RESPONSE: 'ответ на отправку',
@@ -59,6 +60,7 @@ export function ExchangePanel({
           <CopyValue value={card.operationId} label="идентификатор операции" mono />
         </Property>
         {actions}
+        {card.reconciliations && <ReconciliationHistory checks={card.reconciliations} />}
       </Stack>
     </Section>
   );

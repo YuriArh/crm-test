@@ -32,3 +32,5 @@ export type ProblemDecision = Schemas['ProblemDecision'];
 export type ProblemMessage = Schemas['ProblemMessage'];
 export type CurrentResult = Schemas['CurrentResult'];
 export type ResolveProblem = Schemas['ResolveProblem'];
+export type Reconciliation = Schemas['Reconciliation'];
+export type ReconciliationCarrierResult = Schemas['ReconciliationCarrierResult'];

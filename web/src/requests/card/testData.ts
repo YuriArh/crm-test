@@ -1,6 +1,6 @@
 // Fixtures of the card's component tests (imported by *.test.tsx only).
 import { http, HttpResponse } from 'msw';
-import type { Me, RequestCard, UserSummary } from '@/shared/api';
+import type { Me, Reconciliation, RequestCard, UserSummary } from '@/shared/api';
 import { demoInitiator, server } from '@/test/server';
 
 export const CARD_ID ='0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60';
@@ -63,11 +63,16 @@ export function rejectedCard(overrides: Partial<RequestCard> = {}): RequestCard 
   });
 }
 
-/** The operator's view: the same card with the exchange block and its problems (none unless given). */
+/**
+ * The operator's view: the same card with the exchange block, its problems and reconciliation checks (none unless
+ * given) and `RECONCILE`, which dispatch offers an operator in any state.
+ */
 export function withExchange(card: RequestCard): RequestCard {
   return {
     problems: [],
+    reconciliations: [],
     ...card,
+    actions: card.actions.includes('RECONCILE') ? card.actions : [...card.actions, 'RECONCILE'],
     exchange: {
       attempts: 2,
       nextAttemptAt: null,
@@ -94,6 +99,30 @@ export function serveCard(next: RequestCard | (() => RequestCard)) {
     }),
   );
   return calls;
+}
+
+/** One reconciliation check of the card's operation: a manual `MATCH` by the demo operator unless overridden. */
+export function reconciliation(overrides: Partial<Reconciliation> = {}): Reconciliation {
+  return {
+    id: crypto.randomUUID(),
+    checkedAt: '2026-11-14T11:58:00Z',
+    trigger: 'MANUAL',
+    performedBy: { id: demoOperator.id, displayName: demoOperator.displayName },
+    outcome: 'MATCH',
+    acknowledged: false,
+    carrierState: 'EXECUTED',
+    carrierResult: {
+      status: 'SUCCEEDED',
+      trackingNumber: 'TRK-3F1C2B4D',
+      price: 612.5,
+      reason: null,
+      sequence: 2,
+      messageId: '0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e71',
+      occurredAt: '2026-11-12T09:15:08Z',
+    },
+    details: 'The carrier has the same result',
+    ...overrides,
+  };
 }
 
 export function serveOperators(list: UserSummary[] = operators) {

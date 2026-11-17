@@ -36,7 +36,7 @@ export const KIND_VIEWS: Record<ProblemKind, KindView> = {
   },
   RECONCILIATION_CONFLICT: {
     label: 'Расхождение при сверке',
-    hint: 'Итог перевозчика отличается от нашего',
+    hint: 'Итог перевозчика отличается от нашего или итог есть только у нас',
     color: 'red',
   },
 };

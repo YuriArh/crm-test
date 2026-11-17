@@ -12,6 +12,8 @@ const EXPLANATIONS: Partial<Record<DeliveryStatus, string>> = {
   FAILED: 'Начнётся новая серия попыток. Перевозчик получит ту же операцию и не исполнит её дважды.',
   UNKNOWN:
     'Отправим сейчас, не дожидаясь паузы. Проблема «неизвестно, получена ли» останется открытой, пока перевозчик не подтвердит получение.',
+  // dispatch offers a retry of an acknowledged delivery only when the carrier lost the operation (EXTERNAL_MISSING).
+  ACKNOWLEDGED: 'Перевозчик потерял операцию. Отправим её заново с тем же идентификатором.',
 };
 
 const TEXTS = { stale: 'Повтор уже не нужен: состояние доставки изменилось', gone: 'Заявка не найдена' };
