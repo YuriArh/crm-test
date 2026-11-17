@@ -33,6 +33,24 @@ test('on a phone the card fits the width and the save bar stays at the bottom', 
   await expect(bar).toHaveCount(0);
 });
 
+test('on a phone the history fits the width and opens its details', async ({ page }) => {
+  const request = await createRequestViaApi(page, 'north.initiator');
+  await signInViaApi(page, 'north.operator');
+
+  await page.goto(`/requests/${request.id}`);
+  const history = page.getByRole('region', { name: 'История' });
+  const attempt = history
+    .getByRole('listitem')
+    .filter({ has: page.getByRole('heading', { name: /Попытка отправки 1/ }) });
+  await expect(attempt).toBeVisible({ timeout: 30_000 });
+  await attempt.scrollIntoViewIfNeeded();
+  expect(await hasNoHorizontalScroll(page)).toBe(true);
+
+  await attempt.getByRole('button', { name: 'Подробнее' }).click();
+  await expect(attempt.getByText(/Длительность: \d+ мс/)).toBeVisible();
+  expect(await hasNoHorizontalScroll(page)).toBe(true);
+});
+
 test('on a phone the tracking number can be copied', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const request = await createRequestViaApi(page, 'north.initiator');

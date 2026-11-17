@@ -14,6 +14,10 @@ import com.acme.dispatch.common.web.ErrorCode;
 import com.acme.dispatch.config.IdGenerator;
 import com.acme.dispatch.exchange.DispatchOperationDao;
 import com.acme.dispatch.exchange.PayloadHasher;
+import com.acme.dispatch.history.Changes;
+import com.acme.dispatch.history.RequestEvent;
+import com.acme.dispatch.history.RequestEventDao;
+import com.acme.dispatch.history.RequestEventKind;
 import com.acme.dispatch.idempotency.IdempotencyService;
 import com.acme.dispatch.idempotency.IdempotentOutcome;
 import com.acme.dispatch.idempotency.IdempotentResponse;
@@ -40,10 +44,11 @@ public class RequestService {
     private final AppUserRepository users;
     private final BusinessCalendar calendar;
     private final IdGenerator ids;
+    private final RequestEventDao events;
 
     public RequestService(DeliveryRequestRepository requests, DispatchOperationDao operations,
                           IdempotencyService idempotency, RequestQueryService queries, AppUserRepository users,
-                          BusinessCalendar calendar, IdGenerator ids) {
+                          BusinessCalendar calendar, IdGenerator ids, RequestEventDao events) {
         this.requests = requests;
         this.operations = operations;
         this.idempotency = idempotency;
@@ -51,6 +56,7 @@ public class RequestService {
         this.users = users;
         this.calendar = calendar;
         this.ids = ids;
+        this.events = events;
     }
 
     /**
@@ -88,6 +94,8 @@ public class RequestService {
         // The aggregate decides what changes. It is only an in-memory copy: if a check below fails,
         // it is discarded without being saved.
         Instant now = calendar.now();
+        String commentBefore = request.getComment();
+        UUID assigneeBefore = request.getAssigneeId();
         boolean commentChanged = body.comment().present()
                 && request.changeComment(body.comment().value(), now);
         boolean assigneeChanged = body.assigneeId().present()
@@ -109,11 +117,19 @@ public class RequestService {
             checkAssignee(request.getAssigneeId(), request.getServiceId());
         }
 
+        DeliveryRequest saved;
         try {
-            requests.save(request);
+            saved = requests.save(request);
         } catch (OptimisticLockingFailureException e) {
             throw versionConflict(id, user);
         }
+        // The new version and its event, in one transaction (docs/specs/request-history.md §2.1).
+        events.insert(new RequestEvent(ids.newId(), id, saved.getVersion(), now, user.id(), RequestEventKind.EDITED,
+                new Changes()
+                        .field("comment", commentBefore, saved.getComment())
+                        .field("assigneeId", assigneeBefore, saved.getAssigneeId())
+                        .list(),
+                null, null));
         log.info("Delivery request {} updated by {} (comment: {}, assignee: {})",
                 id, user.username(), commentChanged, assigneeChanged);
         return queries.getCard(id, user);

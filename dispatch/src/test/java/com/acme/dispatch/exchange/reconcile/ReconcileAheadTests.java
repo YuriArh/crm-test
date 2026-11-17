@@ -20,6 +20,7 @@ import com.acme.dispatch.request.RequestCard;
 import com.acme.dispatch.support.FakeCarrier;
 import com.acme.dispatch.support.IntegrationTest;
 import com.acme.dispatch.support.MutableClock;
+import com.acme.dispatch.support.TestEvents;
 import com.acme.dispatch.support.TestRequests;
 import com.acme.dispatch.support.TestResults;
 import com.acme.dispatch.support.TestRows;
@@ -103,6 +104,40 @@ class ReconcileAheadTests {
     }
 
     @Test
+    void takenOverResultIsRecorded() {
+        RequestCard request = requests.create("1");
+        carrier.answer(PERMANENT);
+        worker.runOnce();
+        carrier.lookupAnswer(request.operationId(), FakeCarrier.executed(request.operationId(),
+                succeeded(1, request.operationId(), "TRK-00000001", "612.50")));
+
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+
+        assertThat(TestEvents.of(jdbc, request.id())).containsExactly("RESULT_CHANGED v1 by system [businessStatus: "
+                + "AWAITING → SUCCEEDED, trackingNumber: null → TRK-00000001, price: null → 612.5]");
+        UUID record = jdbc.sql("SELECT id FROM inbox WHERE operation_id = :id")
+                .param("id", request.operationId()).query(UUID.class).single();
+        assertThat(TestEvents.links(jdbc, request.id())).containsExactly(record + "/-");
+    }
+
+    @Test
+    void takenOverRecordHasProcessedAt() {
+        RequestCard request = requests.create("1");
+        carrier.answer(PERMANENT);
+        worker.runOnce();
+        carrier.lookupAnswer(request.operationId(), FakeCarrier.executed(request.operationId(),
+                succeeded(1, request.operationId(), "TRK-00000001", "612.50")));
+        clock.advance(Duration.ofMinutes(3));
+
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+
+        assertThat(jdbc.sql("SELECT processed_at FROM inbox WHERE operation_id = :id")
+                .param("id", request.operationId())
+                .query((rs, n) -> rs.getObject(1, java.time.OffsetDateTime.class).toInstant()).single())
+                .isEqualTo(START.plus(Duration.ofMinutes(3)));
+    }
+
+    @Test
     void invalidFeedRecordThenReconciliation() {
         RequestCard request = acknowledged();
         JsonNode good = succeeded(1, request.operationId(), "TRK-00000001", "612.50");
@@ -137,7 +172,7 @@ class ReconcileAheadTests {
         RequestCard request = acknowledged();
         carrier.lookupAnswer(request.operationId(), FakeCarrier.executed(request.operationId(),
                 succeeded(1, request.operationId(), "TRK-00000001", "612.50")));
-        doThrow(new IllegalStateException("disk full")).when(inboxDao).applyToRequest(any(), any(), any());
+        doThrow(new IllegalStateException("disk full")).when(inboxDao).applyToRequest(any(), any(), any(), any());
 
         reconciler.check(request.id(), RunType.SCHEDULED, null);
 
@@ -157,7 +192,7 @@ class ReconcileAheadTests {
         RequestCard request = acknowledged();
         carrier.lookupAnswer(request.operationId(), FakeCarrier.executed(request.operationId(),
                 succeeded(1, request.operationId(), "TRK-00000001", "612.50")));
-        doThrow(new IllegalStateException("disk full")).when(inboxDao).applyToRequest(any(), any(), any());
+        doThrow(new IllegalStateException("disk full")).when(inboxDao).applyToRequest(any(), any(), any(), any());
         reconciler.check(request.id(), RunType.SCHEDULED, null);
         org.mockito.Mockito.reset(inboxDao);
         clock.advance(Duration.ofMinutes(5));

@@ -121,6 +121,16 @@ class ResultInboxTests {
     }
 
     @Test
+    void receivedRecordIsNotProcessed() {
+        RequestCard request = requests.create("1");
+
+        UUID id = results.receive(succeeded(1, request.operationId(), "TRK-00000001", "325.00")).orElseThrow();
+
+        assertThat(results.status(id)).isEqualTo("RECEIVED");
+        assertThat(results.processedAt(id)).isNull();
+    }
+
+    @Test
     void olderResultIsStaleAndDoesNotRollBack() {
         RequestCard request = requests.create("1");
         accept(succeeded(1, request.operationId(), "TRK-00000001", "325.00"));

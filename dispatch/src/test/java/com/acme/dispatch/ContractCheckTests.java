@@ -28,7 +28,7 @@ class ContractCheckTests {
 
     @Test
     void pathMissingFromTheContractFails() {
-        assertThatThrownBy(() -> mockMvc.perform(get("/api/requests/" + UUID.randomUUID() + "/history")
+        assertThatThrownBy(() -> mockMvc.perform(get("/api/requests/" + UUID.randomUUID() + "/attachments")
                 .with(asUser(users, NORTH_INITIATOR_LOGIN))))
                 .hasMessageContaining("validation.request.path.missing");
     }

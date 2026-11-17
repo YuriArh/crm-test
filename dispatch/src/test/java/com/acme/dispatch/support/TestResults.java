@@ -1,5 +1,7 @@
 package com.acme.dispatch.support;
 
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -54,5 +56,12 @@ public class TestResults {
     public String status(UUID inboxId) {
         return jdbc.sql("SELECT processing_status FROM inbox WHERE id = :id")
                 .param("id", inboxId).query(String.class).single();
+    }
+
+    /** When the record got its processing outcome, or {@code null}. */
+    public Instant processedAt(UUID inboxId) {
+        OffsetDateTime value = jdbc.sql("SELECT processed_at FROM inbox WHERE id = :id").param("id", inboxId)
+                .query((rs, n) -> rs.getObject(1, OffsetDateTime.class)).list().getFirst();
+        return value == null ? null : value.toInstant();
     }
 }

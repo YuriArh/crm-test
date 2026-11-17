@@ -36,3 +36,7 @@ export type OurSide = Schemas['OurSide'];
 export type ResolveProblem = Schemas['ResolveProblem'];
 export type Reconciliation = Schemas['Reconciliation'];
 export type ReconciliationCarrierResult = Schemas['ReconciliationCarrierResult'];
+export type HistoryPage = Schemas['HistoryPage'];
+export type HistoryEntry = Schemas['HistoryEntry'];
+export type HistoryKind = Schemas['HistoryKind'];
+export type FieldChange = Schemas['FieldChange'];

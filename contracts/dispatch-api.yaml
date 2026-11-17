@@ -638,6 +638,54 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
 
+  /api/requests/{id}/history:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id. A malformed id answers `404`, like a missing request.
+        schema:
+          type: string
+    get:
+      tags: [requests]
+      operationId: getRequestHistory
+      summary: History of a request
+      description: |
+        One feed of the request's changes and its exchange with the carrier, newest first. Whoever sees the
+        request sees its history: an operator of its service sees everything, its initiator sees the business
+        part only (`CREATED`, `EDITED`, `RESULT_CHANGED`, `DELIVERY_ACKNOWLEDGED`) without links to carrier records
+        and problems. Entries of one instant follow cause (an attempt before the acknowledgement it brought, a
+        result before its problem). An entry is identified by `kind` and `id` together.
+      parameters:
+        - name: before
+          in: query
+          description: '`nextCursor` of the previous page; the newest entries when omitted.'
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: One page of the history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryPage'
+              examples:
+                operator:
+                  $ref: '#/components/examples/HistoryPage'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/problems:
     get:
       tags: [problems]
@@ -1018,6 +1066,75 @@ components:
           messageId: 0195f3a2-8000-7a00-8b00-000000000002
           occurredAt: '2026-11-12T09:15:09Z'
         details: 'Carrier has result SUCCEEDED|TRK-3F1C2B4D|612.5|, we have none; response: {"operationId":…}'
+    HistoryPage:
+      summary: A request's history as an operator sees it
+      value:
+        items:
+          - id: 0195f3a2-9c00-7000-8000-000000000003
+            kind: EDITED
+            at: '2026-11-12T09:30:00Z'
+            actor:
+              id: 0195f3a2-0000-7000-8000-000000000102
+              displayName: Оператор (Север)
+            version: 3
+            changes:
+              - field: assignee
+                from: null
+                to:
+                  id: 0195f3a2-0000-7000-8000-000000000102
+                  displayName: Оператор (Север)
+          - id: 0195f3a2-9c00-7000-8000-000000000002
+            kind: RESULT_CHANGED
+            at: '2026-11-12T09:15:10Z'
+            actor: null
+            version: 2
+            changes:
+              - field: businessStatus
+                from: IN_PROGRESS
+                to: SUCCEEDED
+              - field: trackingNumber
+                from: null
+                to: TRK-3F1C2B4D
+              - field: price
+                from: null
+                to: '612.5'
+            recordId: 0195f3a2-9000-7000-8000-000000000002
+            problemId: null
+          - id: 0195f3a2-9000-7000-8000-000000000002
+            kind: RESULT_RECEIVED
+            at: '2026-11-12T09:15:10Z'
+            actor: null
+            recordId: 0195f3a2-9000-7000-8000-000000000002
+            source: FEED
+            resultStatus: SUCCEEDED
+            sequence: 2
+            processingStatus: APPLIED
+            reason: null
+            duplicates: 0
+            lastDuplicateAt: null
+            receivedAt: '2026-11-12T09:15:10Z'
+          - id: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f
+            kind: DELIVERY_ACKNOWLEDGED
+            at: '2026-11-12T09:00:02Z'
+            actor: null
+            via: RESPONSE
+          - id: 0195f3a2-9b00-7000-8000-000000000001
+            kind: SEND_ATTEMPT
+            at: '2026-11-12T09:00:01Z'
+            actor: null
+            attemptNo: 1
+            outcome: ACKNOWLEDGED
+            httpStatus: 202
+            error: null
+            durationMs: 85
+            finishedAt: '2026-11-12T09:00:01Z'
+          - id: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60
+            kind: CREATED
+            at: '2026-11-12T09:00:00Z'
+            actor:
+              id: 0195f3a2-0000-7000-8000-000000000101
+              displayName: Инициатор (Север)
+        nextCursor: null
     ProblemPage:
       summary: An open result conflict, as an operator sees it
       value:
@@ -1679,6 +1796,335 @@ components:
         occurredAt:
           type: string
           format: date-time
+
+    HistoryPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryEntry'
+        nextCursor:
+          type: [string, 'null']
+          description: Pass it as `before` for the next (older) page; `null` on the last page.
+
+    HistoryKind:
+      type: string
+      enum: [CREATED, EDITED, RESULT_CHANGED, DELIVERY_ACKNOWLEDGED, DELIVERY_RETRIED, SEND_ATTEMPT, RESULT_RECEIVED,
+             RECONCILIATION, PROBLEM_OPENED, PROBLEM_RESOLVED]
+      description: |
+        `CREATED` — the request was created; `EDITED` — its comment or assignee changed; `RESULT_CHANGED` — its
+        result changed (from the carrier, or the carrier's version an operator applied); `DELIVERY_ACKNOWLEDGED` —
+        the carrier confirmed receipt; `DELIVERY_RETRIED` — an operator retried the delivery; `SEND_ATTEMPT` — an
+        attempt to send; `RESULT_RECEIVED` — a carrier record and how it was processed; `RECONCILIATION` — a
+        reconciliation check; `PROBLEM_OPENED`, `PROBLEM_RESOLVED` — a problem of the exchange and its decision.
+
+    HistoryEntry:
+      description: One entry; the fields after `actor` depend on `kind` (each variant fixes its `kind`).
+      oneOf:
+        - $ref: '#/components/schemas/HistoryCreated'
+        - $ref: '#/components/schemas/HistoryEdited'
+        - $ref: '#/components/schemas/HistoryResultChanged'
+        - $ref: '#/components/schemas/HistoryDeliveryAcknowledged'
+        - $ref: '#/components/schemas/HistoryDeliveryRetried'
+        - $ref: '#/components/schemas/HistorySendAttempt'
+        - $ref: '#/components/schemas/HistoryResultReceived'
+        - $ref: '#/components/schemas/HistoryReconciliation'
+        - $ref: '#/components/schemas/HistoryProblemOpened'
+        - $ref: '#/components/schemas/HistoryProblemResolved'
+
+    HistoryEntryId:
+      type: string
+      format: uuid
+      description: |
+        The id of what the entry is about: the request (`CREATED`), the event (`EDITED`, `RESULT_CHANGED`,
+        `DELIVERY_RETRIED`), the operation (`DELIVERY_ACKNOWLEDGED`), the attempt, the carrier record, the check,
+        the problem. Unique together with `kind`.
+
+    HistoryActor:
+      description: Who did it; `null` — the system.
+      oneOf:
+        - $ref: '#/components/schemas/PersonRef'
+        - type: 'null'
+
+    HistoryCreated:
+      type: object
+      required: [id, kind, at, actor]
+      properties:
+        id:
+          $ref: '#/components/schemas/HistoryEntryId'
+        kind:
+          const: CREATED
+        at:
+          type: string
+          format: date-time
+        actor:
+          $ref: '#/components/schemas/HistoryActor'
+
+    HistoryEdited:
+      type: object
+      required: [id, kind, at, actor, version, changes]
+      properties:
+        id:
+          $ref: '#/components/schemas/HistoryEntryId'
+        kind:
+          const: EDITED
+        at:
+          type: string
+          format: date-time
+        actor:
+          $ref: '#/components/schemas/HistoryActor'
+        version:
+          type: integer
+          format: int64
+          description: The version of the request this change made.
+        changes:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/FieldChange'
+
+    HistoryResultChanged:
+      type: object
+      required: [id, kind, at, actor, version, changes, recordId, problemId]
+      properties:
+        id:
+          $ref: '#/components/schemas/HistoryEntryId'
+        kind:
+          const: RESULT_CHANGED
+        at:
+          type: string
+          format: date-time
+        actor:
+          $ref: '#/components/schemas/HistoryActor'
+        version:
+          type: integer
+          format: int64
+        changes:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/FieldChange'
+        recordId:
+          type: [string, 'null']
+          format: uuid
+          description: The carrier record whose result was applied; `null` for an initiator.
+        problemId:
+          type: [string, 'null']
+          format: uuid
+          description: The problem an operator applied it in; `null` otherwise and for an initiator.
+
+    HistoryDeliveryAcknowledged:
+      type: object
+      required: [id, kind, at, actor, via]
+      properties:
+        id:
+          $ref: '#/components/schemas/HistoryEntryId'
+        kind:
+          const: DELIVERY_ACKNOWLEDGED
+        at:
+          type: string
+          format: date-time
+        actor:
+          $ref: '#/components/schemas/HistoryActor'
+        via:
+          description: How receipt became known; `null` for an initiator.
+          oneOf:
+            - type: string
+              enum: [RESPONSE, RESULT, RECONCILIATION]
+            - type: 'null'
+
+    HistoryDeliveryRetried:
+      type: object
+      required: [id, kind, at, actor, changes]
+      properties:
+        id:
+          $ref: '#/components/schemas/HistoryEntryId'
+        kind:
+          const: DELIVERY_RETRIED
+        at:
+          type: string
+          format: date-time
+        actor:
+          $ref: '#/components/schemas/HistoryActor'
+        changes:
+          type: array
+          description: The delivery status the retry found and left (`UNKNOWN` stays `UNKNOWN`).
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/FieldChange'
+
+    HistorySendAttempt:
+      type: object
+      required: [id, kind, at, actor, attemptNo, outcome, httpStatus, error, durationMs, finishedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/HistoryEntryId'
+        kind:
+          const: SEND_ATTEMPT
+        at:
+          type: string
+          format: date-time
+        actor:
+          $ref: '#/components/schemas/HistoryActor'
+        attemptNo:
+          type: integer
+        outcome:
+          description: '`null` while the attempt is in progress.'
+          oneOf:
+            - type: string
+              enum: [ACKNOWLEDGED, TEMPORARY_ERROR, UNKNOWN, PERMANENT_ERROR, PAYLOAD_CONFLICT]
+            - type: 'null'
+        httpStatus:
+          type: [integer, 'null']
+        error:
+          type: [string, 'null']
+        durationMs:
+          type: [integer, 'null']
+        finishedAt:
+          type: [string, 'null']
+          format: date-time
+
+    HistoryResultReceived:
+      type: object
+      required: [id, kind, at, actor, recordId, source, resultStatus, sequence, processingStatus, reason, duplicates,
+                 lastDuplicateAt, receivedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/HistoryEntryId'
+        kind:
+          const: RESULT_RECEIVED
+        at:
+          type: string
+          format: date-time
+          description: When it was processed (when it was received, for records older than the history).
+        actor:
+          $ref: '#/components/schemas/HistoryActor'
+        recordId:
+          type: string
+          format: uuid
+        source:
+          type: string
+          enum: [FEED, RECONCILIATION]
+        resultStatus:
+          type: [string, 'null']
+          description: The record's result status, `null` when it could not be read.
+        sequence:
+          type: [integer, 'null']
+        processingStatus:
+          type: string
+          enum: [RECEIVED, APPLIED, STALE, CONFLICT, INVALID, FAILED]
+        reason:
+          type: [string, 'null']
+        duplicates:
+          type: integer
+          description: How many times the same message came again (no effect).
+        lastDuplicateAt:
+          type: [string, 'null']
+          format: date-time
+        receivedAt:
+          type: string
+          format: date-time
+
+    HistoryReconciliation:
+      type: object
+      required: [id, kind, at, actor, trigger, outcome, details]
+      properties:
+        id:
+          $ref: '#/components/schemas/HistoryEntryId'
+        kind:
+          const: RECONCILIATION
+        at:
+          type: string
+          format: date-time
+        actor:
+          $ref: '#/components/schemas/HistoryActor'
+        trigger:
+          type: string
+          enum: [STARTUP, SCHEDULED, MANUAL]
+        outcome:
+          type: string
+          enum: [MATCH, EXTERNAL_AHEAD, EXTERNAL_MISSING, CONFLICT, ERROR]
+        details:
+          type: string
+
+    HistoryProblemOpened:
+      type: object
+      required: [id, kind, at, actor, problemId, problemKind]
+      properties:
+        id:
+          $ref: '#/components/schemas/HistoryEntryId'
+        kind:
+          const: PROBLEM_OPENED
+        at:
+          type: string
+          format: date-time
+        actor:
+          $ref: '#/components/schemas/HistoryActor'
+        problemId:
+          type: string
+          format: uuid
+        problemKind:
+          $ref: '#/components/schemas/ProblemKind'
+
+    HistoryProblemResolved:
+      type: object
+      required: [id, kind, at, actor, problemId, problemKind, decision, comment]
+      properties:
+        id:
+          $ref: '#/components/schemas/HistoryEntryId'
+        kind:
+          const: PROBLEM_RESOLVED
+        at:
+          type: string
+          format: date-time
+        actor:
+          $ref: '#/components/schemas/HistoryActor'
+        problemId:
+          type: string
+          format: uuid
+        problemKind:
+          $ref: '#/components/schemas/ProblemKind'
+        decision:
+          $ref: '#/components/schemas/ProblemDecision'
+        comment:
+          type: [string, 'null']
+
+    FieldChange:
+      description: One field of a change, before and after.
+      oneOf:
+        - $ref: '#/components/schemas/ValueChange'
+        - $ref: '#/components/schemas/AssigneeChange'
+
+    ValueChange:
+      type: object
+      required: [field, from, to]
+      properties:
+        field:
+          type: string
+          enum: [comment, businessStatus, trackingNumber, price, rejectionReason, deliveryStatus]
+          description: '`price` is a decimal number written as text, without trailing zeros.'
+        from:
+          type: [string, 'null']
+        to:
+          type: [string, 'null']
+
+    AssigneeChange:
+      type: object
+      required: [field, from, to]
+      properties:
+        field:
+          type: string
+          enum: [assignee]
+        from:
+          oneOf:
+            - $ref: '#/components/schemas/PersonRef'
+            - type: 'null'
+        to:
+          oneOf:
+            - $ref: '#/components/schemas/PersonRef'
+            - type: 'null'
 
     ExchangeProblemPage:
       type: object

@@ -27,6 +27,7 @@ import com.acme.dispatch.support.FakeCarrier;
 import com.acme.dispatch.support.IntegrationTest;
 import com.acme.dispatch.support.MutableClock;
 import com.acme.dispatch.support.OurSide;
+import com.acme.dispatch.support.TestEvents;
 import com.acme.dispatch.support.TestRequests;
 import com.acme.dispatch.support.TestResults;
 import com.acme.dispatch.support.TestRows;
@@ -108,6 +109,32 @@ class ResolveReconciliationProblemTests {
                 .andExpect(jsonPath("$.problems[0].ourSide.result.price").value(612.5))
                 .andExpect(jsonPath("$.reconciliations[0].localResult.trackingNumber").value("TRK-00000001"))
                 .andExpect(jsonPath("$.reconciliations[0].carrierResult.trackingNumber").value("TRK-00000002"));
+    }
+
+    @Test
+    void applyCarrierFromCheckIsRecorded() throws Exception {
+        RequestCard request = withOurResult();
+        carrierHas(request, "TRK-00000002", "700.00");
+        UUID problem = check(request);
+
+        resolve(problem, "APPLY_CARRIER", "ok", "k-1").andExpect(status().isOk());
+
+        assertThat(TestEvents.of(jdbc, request.id())).last().isEqualTo("RESULT_CHANGED v2 by " + NORTH_OPERATOR
+                + " [trackingNumber: TRK-00000001 → TRK-00000002, price: 612.5 → 700]");
+        UUID record = jdbc.sql("SELECT id FROM inbox WHERE source = 'RECONCILIATION'").query(UUID.class).single();
+        assertThat(TestEvents.links(jdbc, request.id())).last().isEqualTo(record + "/" + problem);
+    }
+
+    @Test
+    void keepOursIsNotAResultChange() throws Exception {
+        RequestCard request = withOurResult();
+        carrierHas(request, "TRK-00000002", "700.00");
+        UUID problem = check(request);
+
+        resolve(problem, "KEEP_OURS", "ours", "k-1").andExpect(status().isOk());
+
+        assertThat(TestEvents.of(jdbc, request.id())).as("only the result from the feed").hasSize(1);
+        assertThat(result(request)).endsWith("|1");
     }
 
     @Test
