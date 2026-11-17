@@ -78,7 +78,16 @@ call() {
        -H 'Content-Type: application/json' -w '\n%{http_code}' "$@"
 }
 
-# create <user> <key> <cargo> <weight> <address> <days>: prints the request id ("" if the key was used before).
+# An ISO instant of dispatch as epoch seconds (fractions dropped).
+EPOCH='sub("\\.[0-9]+"; "") | fromdateiso8601'
+
+# The start of this run by dispatch's clock, which also stamps createdAt — not the clock of this machine.
+RUN_STARTED=$(curl -sf "$API/api/system/info" | jq -r ".serverTime | $EPOCH") \
+  || { echo "seed: dispatch is not reachable at $API" >&2; exit 1; }
+
+# create <user> <key> <cargo> <weight> <address> <days>: prints the request id ("" if the key was used another
+# day). A request created before this run — replayed the same day, or the key used another day — is marked as
+# such (`existed <key>`): a fault scenario cannot be played on it, faults apply at the first receipt only.
 create() {
   local user=$1 key=$2 body out status
   body=$(jq -nc --arg c "$3" --argjson w "$4" --arg a "$5" --arg d "$(deadline "$6")" \
@@ -86,27 +95,41 @@ create() {
   out=$(call "$user" -H "Idempotency-Key: $key" -d "$body" "$API/api/requests")
   status=$(tail -n1 <<<"$out")
   case "$status" in
-    200|201) sed '$d' <<<"$out" | jq -r .id ;;
+    200|201)
+      if sed '$d' <<<"$out" | jq -e --argjson started "$RUN_STARTED" ".createdAt | $EPOCH < \$started" >/dev/null; then
+        touch "$WORK/$key.existed"
+      fi
+      sed '$d' <<<"$out" | jq -r .id ;;
     422) if sed '$d' <<<"$out" | jq -e '.code == "IDEMPOTENCY_KEY_REUSED"' >/dev/null; then
-           echo "  $key: already created earlier, skipped" >&2; echo ""
+           echo "  $key: already created earlier, skipped" >&2; touch "$WORK/$key.existed"; echo ""
          else echo "seed: $key rejected: $(sed '$d' <<<"$out")" >&2; exit 1; fi ;;
     *) echo "seed: $key failed with HTTP $status: $(sed '$d' <<<"$out")" >&2; exit 1 ;;
   esac
 }
 
-# final_card <user> <id>: waits up to 30 s for the carrier's final result, prints the card.
-final_card() {
-  local card
-  for _ in $(seq 1 30); do
-    card=$(call "$1" "$API/api/requests/$2" | sed '$d')
-    if jq -e '.businessStatus == "SUCCEEDED" or .businessStatus == "REJECTED"' <<<"$card" >/dev/null; then
-      echo "$card"; return
-    fi
+# existed <key>: the request of this key was created before this run.
+existed() { [ -e "$WORK/$1.existed" ]; }
+
+# The state of a card in one line, for progress and for errors.
+STATE='"\(.number): \(.businessStatus), delivery \(.deliveryStatus), attempts \(.exchange.attempts // "—"), problems \([.problems[]? | "\(.kind) \(.status)"] | if length == 0 then "none" else join(", ") end)"'
+
+# wait_card <user> <id> <jq condition> <seconds> <what>: asks for the card every second until the condition holds,
+# prints the card. Gives up with the request, what was awaited and the last state seen.
+wait_card() {
+  local user=$1 id=$2 condition=$3 seconds=$4 what=$5 card=''
+  for _ in $(seq 1 "$seconds"); do
+    card=$(call "$user" "$API/api/requests/$id" | sed '$d')
+    if jq -e "$condition" <<<"$card" >/dev/null 2>&1; then echo "$card"; return; fi
     sleep 1
   done
-  echo "seed: request $2 got no result in 30 s (is carrier-emulator running?)" >&2
+  echo "seed: request $id: no $what in $seconds s; last state: $(jq -r "$STATE" <<<"$card" 2>/dev/null || echo "$card")" >&2
   exit 1
 }
+
+FINAL='.businessStatus == "SUCCEEDED" or .businessStatus == "REJECTED"'
+
+# final_card <user> <id>: waits up to 30 s for the carrier's final result, prints the card.
+final_card() { wait_card "$1" "$2" "$FINAL" 30 "final result"; }
 
 # patch <user> <id> <json fields>: edits a request with its current version.
 patch() {
@@ -133,6 +156,11 @@ operator=$(call north.operator "$API/api/auth/me" | sed '$d' | jq -r .id)
 [ -n "$n1" ] && patch north.operator "$n1" "{\"assigneeId\":\"$operator\",\"comment\":\"Согласовать время разгрузки\"}"
 [ -n "$n3" ] && patch north.operator "$n3" "{\"assigneeId\":\"$operator\",\"comment\":\"Уточнить у клиента: разбить на две отправки\"}"
 [ -n "$n2" ] && patch north.initiator "$n2" '{"comment":"Хрупкое, не кантовать"}'
+
+# Fault modes are global: no request above may still be on its way when one is switched on.
+for entry in "${ids[@]}"; do
+  [ -n "${entry#*:}" ] && final_card "${entry%%:*}" "${entry#*:}" >/dev/null
+done
 
 echo "Created requests and their outcomes:"
 for entry in "${ids[@]}"; do
