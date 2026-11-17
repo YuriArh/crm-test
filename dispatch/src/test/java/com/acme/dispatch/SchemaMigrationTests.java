@@ -33,6 +33,8 @@ class SchemaMigrationTests {
 
     static final OffsetDateTime NOW = OffsetDateTime.of(2026, 11, 12, 9, 0, 0, 0, ZoneOffset.UTC);
 
+    static final String CHANGE = "[{\"field\": \"comment\", \"from\": null, \"to\": \"Call first\"}]";
+
     @Autowired
     Flyway flyway;
 
@@ -42,7 +44,163 @@ class SchemaMigrationTests {
     @Test
     void allMigrationsAreApplied() {
         assertThat(Arrays.stream(flyway.info().applied()).map(MigrationInfo::getVersion).map(Object::toString))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13");
+    }
+
+    @Test
+    void requestEventIsAccepted() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+        UUID record = insertInboxRecord("APPLIED");
+        UUID problem = insertProblem("RESULT_CONFLICT", "OPEN", request, insertInboxRecord("CONFLICT"), null, null,
+                null);
+
+        insertEvent(request, "EDITED", 1L, NORTH_INITIATOR, null, null, CHANGE);
+        insertEvent(request, "RESULT_CHANGED", 2L, null, record, null, CHANGE);
+        insertEvent(request, "RESULT_CHANGED", 3L, NORTH_OPERATOR, record, problem, CHANGE);
+        insertEvent(request, "DELIVERY_RETRIED", null, NORTH_OPERATOR, null, null, CHANGE);
+
+        assertThat(count("SELECT count(*) FROM request_event")).isEqualTo(4);
+    }
+
+    @Test
+    void requestEventKindIsChecked() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertEvent(request, "DELETED", 1L, NORTH_INITIATOR, null, null, CHANGE))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("request_event_kind_valid");
+    }
+
+    @Test
+    void editNeedsVersion() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertEvent(request, "EDITED", null, NORTH_INITIATOR, null, null, CHANGE))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("request_event_version_matches_kind");
+    }
+
+    @Test
+    void retryHasNoVersion() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertEvent(request, "DELIVERY_RETRIED", 1L, NORTH_OPERATOR, null, null, CHANGE))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("request_event_version_matches_kind");
+    }
+
+    @Test
+    void requestEventVersionIsPositive() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertEvent(request, "EDITED", 0L, NORTH_INITIATOR, null, null, CHANGE))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("request_event_version_positive");
+    }
+
+    @Test
+    void requestEventVersionIsUniquePerRequest() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+        UUID other = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+        insertEvent(request, "EDITED", 1L, NORTH_INITIATOR, null, null, CHANGE);
+        insertEvent(other, "EDITED", 1L, NORTH_INITIATOR, null, null, CHANGE);
+
+        assertThatThrownBy(() -> insertEvent(request, "EDITED", 1L, NORTH_OPERATOR, null, null, CHANGE))
+                .isInstanceOf(DuplicateKeyException.class)
+                .hasMessageContaining("request_event_request_version_unique");
+    }
+
+    @Test
+    void requestEventChangesAreArray() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertEvent(request, "EDITED", 1L, NORTH_INITIATOR, null, null, "{}"))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("request_event_changes_array");
+    }
+
+    @Test
+    void requestEventChangesAreNotEmpty() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertEvent(request, "EDITED", 1L, NORTH_INITIATOR, null, null, "[]"))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("request_event_changes_array");
+    }
+
+    @Test
+    void editNeedsActor() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertEvent(request, "EDITED", 1L, null, null, null, CHANGE))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("request_event_actor_required");
+    }
+
+    @Test
+    void retryNeedsActor() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertEvent(request, "DELIVERY_RETRIED", null, null, null, null, CHANGE))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("request_event_actor_required");
+    }
+
+    @Test
+    void resultChangeNeedsRecord() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertEvent(request, "RESULT_CHANGED", 1L, null, null, null, CHANGE))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("request_event_result_has_record");
+    }
+
+    @Test
+    void editHasNoRecord() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+        UUID record = insertInboxRecord("APPLIED");
+
+        assertThatThrownBy(() -> insertEvent(request, "EDITED", 1L, NORTH_INITIATOR, record, null, CHANGE))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("request_event_result_has_record");
+    }
+
+    @Test
+    void retryHasNoProblem() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+        UUID problem = insertProblem("RESULT_CONFLICT", "OPEN", request, insertInboxRecord("CONFLICT"), null, null,
+                null);
+
+        assertThatThrownBy(() -> insertEvent(request, "DELIVERY_RETRIED", null, NORTH_OPERATOR, null, problem,
+                CHANGE))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("request_event_result_has_record");
+    }
+
+    @Test
+    void receivedRecordIsNotProcessed() {
+        assertThatThrownBy(() -> jdbc.sql("""
+                        INSERT INTO inbox (id, feed_seq, payload, source, processing_status, next_attempt_at,
+                                           received_at, processed_at)
+                        VALUES (:id, 1, '{}', 'FEED', 'RECEIVED', :now, :now, :now)""")
+                .param("id", UUID.randomUUID())
+                .param("now", NOW)
+                .update())
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("inbox_received_not_processed");
+    }
+
+    @Test
+    void processedRecordMayLackProcessedAt() {
+        insertInboxRecord("APPLIED");
+
+        assertThat(count("SELECT count(*) FROM inbox WHERE processed_at IS NULL")).isEqualTo(1);
+    }
+
+    @Test
+    void requestEventIndexExists() {
+        assertThat(jdbc.sql("SELECT indexdef FROM pg_indexes WHERE indexname = 'request_event_request_idx'")
+                .query(String.class).single()).contains("(request_id, occurred_at)");
     }
 
     @Test
@@ -662,6 +820,25 @@ class SchemaMigrationTests {
                 .param("tracking", tracking)
                 .param("price", price)
                 .param("reason", reason)
+                .update();
+    }
+
+    private void insertEvent(UUID requestId, String kind, Long version, UUID actor, UUID inboxId, UUID problemId,
+                             String changes) {
+        jdbc.sql("""
+                        INSERT INTO request_event (id, request_id, version, occurred_at, actor_id, kind, changes,
+                                                   inbox_id, problem_id)
+                        VALUES (:id, :request, :version, :now, :actor, :kind, CAST(:changes AS jsonb), :inbox,
+                                :problem)""")
+                .param("id", UUID.randomUUID())
+                .param("request", requestId)
+                .param("version", version)
+                .param("now", NOW)
+                .param("actor", actor)
+                .param("kind", kind)
+                .param("changes", changes)
+                .param("inbox", inboxId)
+                .param("problem", problemId)
                 .update();
     }
 
