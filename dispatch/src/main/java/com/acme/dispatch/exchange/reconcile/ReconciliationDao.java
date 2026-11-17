@@ -6,6 +6,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -24,6 +25,31 @@ public class ReconciliationDao {
 
     public ReconciliationDao(JdbcClient jdbc) {
         this.jdbc = jdbc;
+    }
+
+    /**
+     * Requests whose operation the background checks now ({@code reconciliation.md} §2.1): delivery {@code UNKNOWN} or
+     * {@code FAILED}; acknowledged before {@code acknowledgedBefore} and still without a final result; or with an open
+     * problem that reconciliation closes. Only those whose next check is due; never checked first.
+     */
+    public List<UUID> findDue(Instant now, Instant acknowledgedBefore, int limit) {
+        return jdbc.sql("""
+                        SELECT o.request_id FROM dispatch_operation o
+                          JOIN delivery_request r ON r.id = o.request_id
+                         WHERE (o.next_reconcile_at IS NULL OR o.next_reconcile_at <= :now)
+                           AND (o.delivery_status IN ('UNKNOWN', 'FAILED')
+                                OR (o.delivery_status = 'ACKNOWLEDGED' AND o.acknowledged_at <= :acknowledgedBefore
+                                    AND r.business_status NOT IN ('SUCCEEDED', 'REJECTED'))
+                                OR EXISTS (SELECT 1 FROM problem p
+                                            WHERE p.request_id = o.request_id AND p.status = 'OPEN'
+                                              AND p.kind IN ('EXTERNAL_MISSING', 'RECONCILIATION_CONFLICT')))
+                         ORDER BY o.next_reconcile_at NULLS FIRST, o.request_id
+                         LIMIT :limit""")
+                .param("now", toSql(now))
+                .param("acknowledgedBefore", toSql(acknowledgedBefore))
+                .param("limit", limit)
+                .query(UUID.class)
+                .list();
     }
 
     /** The operation of a request, without locking: what to ask the carrier about. */

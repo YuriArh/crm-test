@@ -1,8 +1,12 @@
 package com.acme.dispatch.exchange.reconcile;
 
 import java.time.Instant;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import com.acme.dispatch.carrier.CarrierClient;
 import com.acme.dispatch.carrier.CarrierUnavailableException;
@@ -64,6 +68,44 @@ public class Reconciler {
         this.resultInbox = resultInbox;
         this.inbox = inbox;
         this.processor = processor;
+    }
+
+    /**
+     * One background pass: checks the due operations one by one, at most {@code reconcile-per-pass}. An unavailable
+     * carrier stops the pass after the check that found it (that check is recorded); the rest wait for the next pass.
+     *
+     * @return how many checks gave each outcome
+     */
+    public Map<ReconciliationOutcome, Integer> runOnce(RunType runType) {
+        Instant now = calendar.now();
+        List<UUID> due = dao.findDue(now, now.minus(properties.reconcileThreshold()), properties.reconcilePerPass());
+        Map<ReconciliationOutcome, Integer> counts = new EnumMap<>(ReconciliationOutcome.class);
+        for (ReconciliationOutcome outcome : ReconciliationOutcome.values()) {
+            counts.put(outcome, 0);
+        }
+        int checked = 0;
+        for (UUID requestId : due) {
+            Checked result;
+            try {
+                result = check(requestId, runType, null);
+            } catch (RuntimeException e) {
+                log.error("Reconciliation of request {} failed; it is checked again on a later pass: {}", requestId,
+                        e.toString());
+                continue;
+            }
+            checked++;
+            counts.merge(result.outcome(), 1, Integer::sum);
+            if (result.carrierUnavailable()) {
+                log.warn("Reconciliation stopped: carrier unavailable");
+                break;
+            }
+        }
+        if (checked > 0) {
+            log.info("Reconciliation {}: checked {} — {}", runType, checked, counts.entrySet().stream()
+                    .map(entry -> entry.getKey() + " " + entry.getValue())
+                    .collect(Collectors.joining(", ")));
+        }
+        return counts;
     }
 
     /**
