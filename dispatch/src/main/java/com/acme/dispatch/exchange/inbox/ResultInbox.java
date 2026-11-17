@@ -47,12 +47,12 @@ public class ResultInbox {
     public Optional<UUID> receive(JsonNode raw, InboxSource source) {
         Instant now = calendar.now();
         String messageId = cleanMessageId(raw);
-        if (messageId != null && inbox.countDuplicate(messageId, now)) {
+        if (messageId != null && inbox.countDuplicate(source, messageId, now)) {
             return Optional.empty();
         }
         UUID id = ids.newId();
         if (!inbox.insertReceived(id, messageId, feedSeq(raw), JSON.writeValueAsString(raw), source, now)) {
-            inbox.countDuplicate(messageId, now);
+            inbox.countDuplicate(source, messageId, now);
             return Optional.empty();
         }
         return Optional.of(id);

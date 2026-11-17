@@ -103,6 +103,23 @@ class ResultInboxTests {
                 .query((rs, n) -> rs.getInt(1) + "/" + rs.getInt(2)).single()).isEqualTo("1/1");
     }
 
+    /**
+     * The same message from reconciliation is a record of its own (docs/specs/reconciliation.md §2.9): otherwise it
+     * would collapse into a broken feed record with the same messageId and never be applied.
+     */
+    @Test
+    void sameMessageFromReconciliationAfterFeedIsStored() {
+        RequestCard request = requests.create("1");
+        JsonNode message = succeeded(1, request.operationId(), "TRK-00000001", "325.00");
+        accept(message);
+
+        assertThat(results.receive(message, InboxSource.RECONCILIATION)).isPresent();
+
+        assertThat(jdbc.sql("SELECT source || '/' || duplicate_count FROM inbox WHERE message_id = :id ORDER BY source")
+                .param("id", message.get("messageId").asString())
+                .query(String.class).list()).containsExactly("FEED/0", "RECONCILIATION/0");
+    }
+
     @Test
     void olderResultIsStaleAndDoesNotRollBack() {
         RequestCard request = requests.create("1");

@@ -9,6 +9,8 @@ const KINDS = Object.keys({
   INVALID_MESSAGE: 1,
   MESSAGE_FAILED: 1,
   RESULT_CONFLICT: 1,
+  EXTERNAL_MISSING: 1,
+  RECONCILIATION_CONFLICT: 1,
 } satisfies Record<ProblemKind, 1>) as ProblemKind[];
 
 const DECISIONS = Object.keys({
@@ -33,6 +35,8 @@ describe('problem labels', () => {
     expect(KIND_VIEWS.INVALID_MESSAGE.color).toBe('yellow');
     expect(KIND_VIEWS.MESSAGE_FAILED.color).toBe('yellow');
     expect(KIND_VIEWS.RESULT_CONFLICT.color).toBe('red');
+    expect(KIND_VIEWS.EXTERNAL_MISSING.color).toBe('orange');
+    expect(KIND_VIEWS.RECONCILIATION_CONFLICT.color).toBe('red');
   });
 
   it('shows a kind this client does not know by its code, in grey', () => {

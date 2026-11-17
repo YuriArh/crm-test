@@ -157,7 +157,8 @@ export interface paths {
         };
         /**
          * Request card
-         * @description `exchange` and `problems` are present for operators only; `actions` is empty for initiators.
+         * @description `exchange`, `problems` and `reconciliations` are present for operators only; `actions` is empty for
+         *     initiators.
          */
         get: operations["getRequest"];
         put?: never;
@@ -188,13 +189,41 @@ export interface paths {
         put?: never;
         /**
          * Retry the delivery
-         * @description Operators of the request's service only. Allowed while the delivery is `FAILED` or `UNKNOWN`
-         *     (`actions` of the card has `RETRY`). Starts a new budget of retries and sends at once, with the same
-         *     `operationId`: the carrier never executes one operation twice. `FAILED` becomes `PENDING`; `UNKNOWN`
-         *     stays `UNKNOWN` until the carrier confirms receipt. An open `DELIVERY_FAILED` problem is closed as
-         *     `RETRIED`.
+         * @description Operators of the request's service only. Allowed while `actions` of the card has `RETRY`: the delivery
+         *     is `FAILED` or `UNKNOWN`, or it is `ACKNOWLEDGED` but the carrier lost the operation (an open
+         *     `EXTERNAL_MISSING`) and the request has no final result. Starts a new budget of retries and sends at
+         *     once, with the same `operationId`: the carrier never executes one operation twice. `FAILED` and
+         *     `ACKNOWLEDGED` become `PENDING`; `UNKNOWN` stays `UNKNOWN` until the carrier confirms receipt. Open
+         *     `DELIVERY_FAILED` and `EXTERNAL_MISSING` problems are closed as `RETRIED`.
          */
         post: operations["retryDelivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/requests/{id}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Request id. A malformed id answers `404`, like a missing request. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reconcile now
+         * @description Operators of the request's service only; any state. Asks the carrier about the request's operation right
+         *     now and acts as background reconciliation does: confirms the delivery if the carrier knows it, takes the
+         *     carrier's result over if we have none, opens `EXTERNAL_MISSING` or `RECONCILIATION_CONFLICT` for an
+         *     operator. A carrier that does not answer is an outcome too (`ERROR`), not an error of this call. The
+         *     card requested after the response already shows what the check changed.
+         */
+        post: operations["reconcileRequest"];
         delete?: never;
         options?: never;
         head?: never;
@@ -261,9 +290,11 @@ export interface paths {
         /**
          * Decide on a problem
          * @description Operators only; a problem of another service answers `404`. The decision must be one of the problem's
-         *     `actions`: `APPLY_CARRIER` (replace the request's result with the disputed final record) or `KEEP_OURS`
-         *     for `RESULT_CONFLICT`; `ACKNOWLEDGED` for `INVALID_MESSAGE` and `MESSAGE_FAILED`. Delivery problems are
-         *     closed by the system or by retrying the delivery. `APPLY_CARRIER` bumps the request's `version`.
+         *     `actions`: `APPLY_CARRIER` (replace the request's result with the carrier's final result) or `KEEP_OURS`
+         *     for `RESULT_CONFLICT` and `RECONCILIATION_CONFLICT` (`APPLY_CARRIER` only while the carrier's side is a
+         *     final result); `KEEP_OURS` for `EXTERNAL_MISSING` while the request has a final result; `ACKNOWLEDGED`
+         *     for `INVALID_MESSAGE` and `MESSAGE_FAILED`. Delivery problems, and `EXTERNAL_MISSING` without a result,
+         *     are closed by the system or by retrying the delivery. `APPLY_CARRIER` bumps the request's `version`.
          */
         post: operations["resolveProblem"];
         delete?: never;
@@ -461,26 +492,33 @@ export interface components {
             actions: components["schemas"]["RequestAction"][];
             /** @description Problems of the request, open and resolved, newest first. Operators only. */
             problems?: components["schemas"]["ExchangeProblem"][];
+            /** @description The latest reconciliation checks of the request (at most 20), newest first. Operators only. */
+            reconciliations?: components["schemas"]["Reconciliation"][];
         };
         /**
-         * @description `RETRY` — retry the delivery (it is `FAILED` or `UNKNOWN`).
+         * @description `RETRY` — retry the delivery (it is `FAILED` or `UNKNOWN`, or the carrier lost an acknowledged operation
+         *     and there is no result); `RECONCILE` — reconcile now (always offered to an operator).
          * @enum {string}
          */
-        RequestAction: "RETRY";
+        RequestAction: "RETRY" | "RECONCILE";
         /**
          * @description `DELIVERY_UNKNOWN` — unknown whether the carrier got the request (closed by the system once delivery is
          *     confirmed); `DELIVERY_FAILED` — delivery failed (attempts exhausted or refused); `INVALID_MESSAGE` — the
          *     carrier sent a record that breaks the contract; `MESSAGE_FAILED` — `dispatch` could not process a record;
-         *     `RESULT_CONFLICT` — a record disagrees with the applied result.
+         *     `RESULT_CONFLICT` — a record disagrees with the applied result; `EXTERNAL_MISSING` — reconciliation: the
+         *     carrier does not know an operation it acknowledged (closed by the system once it knows it again);
+         *     `RECONCILIATION_CONFLICT` — reconciliation: the carrier's result differs from ours, or only we have one
+         *     (closed by the system once they match).
          * @enum {string}
          */
-        ProblemKind: "DELIVERY_UNKNOWN" | "DELIVERY_FAILED" | "INVALID_MESSAGE" | "MESSAGE_FAILED" | "RESULT_CONFLICT";
+        ProblemKind: "DELIVERY_UNKNOWN" | "DELIVERY_FAILED" | "INVALID_MESSAGE" | "MESSAGE_FAILED" | "RESULT_CONFLICT" | "EXTERNAL_MISSING" | "RECONCILIATION_CONFLICT";
         /** @enum {string} */
         ProblemStatus: "OPEN" | "RESOLVED";
         /**
-         * @description How the problem was closed: `SYSTEM` — by the system (delivery confirmed); `RETRIED` — an operator retried
-         *     the delivery; `APPLY_CARRIER` — an operator applied the disputed record; `KEEP_OURS` — an operator kept the
-         *     applied result; `ACKNOWLEDGED` — an operator looked into the record.
+         * @description How the problem was closed: `SYSTEM` — by the system (delivery confirmed, the carrier knows the operation,
+         *     the results match); `RETRIED` — an operator retried the delivery; `APPLY_CARRIER` — an operator applied the
+         *     carrier's result; `KEEP_OURS` — an operator kept our result; `ACKNOWLEDGED` — an operator looked into the
+         *     record.
          * @enum {string}
          */
         ProblemDecision: "SYSTEM" | "RETRIED" | "APPLY_CARRIER" | "KEEP_OURS" | "ACKNOWLEDGED";
@@ -526,9 +564,13 @@ export interface components {
             request: components["schemas"]["RequestRef"] | null;
             /** Format: uuid */
             operationId: string | null;
-            /** @description For `INVALID_MESSAGE`, `MESSAGE_FAILED`, `RESULT_CONFLICT`; otherwise `null`. */
+            /**
+             * @description The carrier's side: the record for `INVALID_MESSAGE`, `MESSAGE_FAILED`, `RESULT_CONFLICT`; for
+             *     `RECONCILIATION_CONFLICT` the carrier's latest answer (its result fields, `null` when it has no result;
+             *     `feedSeq` is `null`); otherwise `null`.
+             */
             message: components["schemas"]["ProblemMessage"] | null;
-            /** @description For `RESULT_CONFLICT`; otherwise `null`. */
+            /** @description For `RESULT_CONFLICT`, `RECONCILIATION_CONFLICT` and `EXTERNAL_MISSING`; otherwise `null`. */
             currentResult: components["schemas"]["CurrentResult"] | null;
             /** @description The operator who closed it; `null` while open or when the system closed it. */
             resolvedBy: components["schemas"]["PersonRef"] | null;
@@ -542,6 +584,46 @@ export interface components {
             decision: "APPLY_CARRIER" | "KEEP_OURS" | "ACKNOWLEDGED";
             /** @description The ground for the decision; stored stripped, must not be blank. */
             comment: string;
+        };
+        /** @description One reconciliation check of a request's operation with the carrier. */
+        Reconciliation: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            checkedAt: string;
+            /**
+             * @description `MANUAL` — an operator's «reconcile now»; the others are background passes.
+             * @enum {string}
+             */
+            trigger: "STARTUP" | "SCHEDULED" | "MANUAL";
+            /** @description The operator of a manual check; `null` for background checks. */
+            performedBy: components["schemas"]["PersonRef"] | null;
+            /**
+             * @description `MATCH` — nothing to fix; `EXTERNAL_AHEAD` — the carrier had a result we did not, it was taken over;
+             *     `EXTERNAL_MISSING` — the carrier does not know the operation; `CONFLICT` — the results differ, or only
+             *     we have one; `ERROR` — the carrier did not answer or answered against the contract.
+             * @enum {string}
+             */
+            outcome: "MATCH" | "EXTERNAL_AHEAD" | "EXTERNAL_MISSING" | "CONFLICT" | "ERROR";
+            /** @description Whether this check confirmed the delivery. */
+            acknowledged: boolean;
+            /** @description What the carrier said about the operation; `null` when it did not answer. */
+            carrierState: ("ACCEPTED" | "EXECUTED" | "NOT_FOUND") | null;
+            /** @description The carrier's final result; `null` when it has none. */
+            carrierResult: components["schemas"]["ReconciliationCarrierResult"] | null;
+            /** @description Why the check concluded what it did, the carrier's own error text and the start of its answer. */
+            details: string;
+        };
+        ReconciliationCarrierResult: {
+            /** @enum {string} */
+            status: "SUCCEEDED" | "REJECTED";
+            trackingNumber: string | null;
+            price: number | null;
+            reason: string | null;
+            sequence: number;
+            messageId: string;
+            /** Format: date-time */
+            occurredAt: string;
         };
         ExchangeProblemPage: {
             items: components["schemas"]["ExchangeProblem"][];
@@ -944,7 +1026,7 @@ export interface operations {
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `INVALID_STATE`: the delivery is neither `FAILED` nor `UNKNOWN` now. */
+            /** @description `INVALID_STATE`: `RETRY` is not among the actions now (see above). */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -953,6 +1035,58 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description The `Idempotency-Key` was already used for another action or request. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    reconcileRequest: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description Client-generated key of this action, at most 100 characters. A repeat with the same key returns the
+                 *     recorded check and does not ask the carrier again; send a new key to check again.
+                 */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Request id. A malformed id answers `404`, like a missing request. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The recorded check, or the replay of an earlier check with the same key. */
+            200: {
+                headers: {
+                    /** @description `true` when this response was replayed for a repeated `Idempotency-Key`. */
+                    "Idempotent-Replayed"?: "true" | "false";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Reconciliation"];
+                };
+            };
+            /** @description No `Idempotency-Key` header (`IDEMPOTENCY_KEY_REQUIRED`) or a too long one. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             /** @description The `Idempotency-Key` was already used for another action or request. */
             422: {
                 headers: {

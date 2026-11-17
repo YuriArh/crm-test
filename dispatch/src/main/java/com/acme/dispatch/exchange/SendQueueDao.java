@@ -117,16 +117,34 @@ public class SendQueueDao {
 
     /**
      * An operator retries the delivery: a new budget of retries starting from the attempts made so far, due now.
-     * {@code FAILED} becomes {@code PENDING}; {@code UNKNOWN} stays {@code UNKNOWN} (the carrier may have it).
-     * Conditional on the status, so it does nothing to an operation that moved on. Returns whether it retried.
+     * {@code FAILED} becomes {@code PENDING}; {@code UNKNOWN} stays {@code UNKNOWN} (the carrier may have it); an
+     * {@code ACKNOWLEDGED} operation the carrier lost ({@code EXTERNAL_MISSING} open) without a result becomes
+     * {@code PENDING} and forgets its acknowledgement. The reconciliation schedule starts over. Conditional on that
+     * state, the same rule as {@code ProblemRules.canRetry}, so it does nothing to an operation that moved on.
+     * Returns whether it retried.
      */
     public boolean retryByOperator(UUID requestId, Instant now) {
+        // Lock the operation first: the result handler changes the request's result under this lock, so the
+        // next statement (a fresh snapshot) sees whether the request has a result now.
+        jdbc.sql("SELECT 1 FROM dispatch_operation WHERE request_id = :requestId FOR UPDATE")
+                .param("requestId", requestId)
+                .query(Integer.class)
+                .optional();
         return jdbc.sql("""
-                        UPDATE dispatch_operation
-                           SET delivery_status = CASE delivery_status WHEN 'FAILED' THEN 'PENDING'
-                                                     ELSE delivery_status END,
-                               retry_from = attempts, next_attempt_at = :now, last_error = NULL, updated_at = :now
-                         WHERE request_id = :requestId AND delivery_status IN ('FAILED', 'UNKNOWN')""")
+                        UPDATE dispatch_operation o
+                           SET delivery_status = CASE o.delivery_status WHEN 'UNKNOWN' THEN 'UNKNOWN'
+                                                     ELSE 'PENDING' END,
+                               retry_from = o.attempts, next_attempt_at = :now, last_error = NULL,
+                               acknowledged_at = NULL, acknowledged_via = NULL,
+                               reconciled_at = NULL, next_reconcile_at = NULL, updated_at = :now
+                          FROM delivery_request r
+                         WHERE r.id = o.request_id AND o.request_id = :requestId
+                           AND (o.delivery_status IN ('FAILED', 'UNKNOWN')
+                                OR (o.delivery_status = 'ACKNOWLEDGED'
+                                    AND r.business_status NOT IN ('SUCCEEDED', 'REJECTED')
+                                    AND EXISTS (SELECT 1 FROM problem p
+                                                 WHERE p.request_id = o.request_id AND p.status = 'OPEN'
+                                                   AND p.kind = 'EXTERNAL_MISSING')))""")
                 .param("now", toSql(now))
                 .param("requestId", requestId)
                 .update() == 1;

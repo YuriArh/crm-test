@@ -7,6 +7,7 @@ import static com.acme.dispatch.support.DemoData.SOUTH_INITIATOR_LOGIN;
 import static com.acme.dispatch.support.TestClockConfiguration.START;
 import static com.acme.dispatch.support.TestFeed.succeeded;
 import static com.acme.dispatch.support.TestSecurity.asUser;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -160,6 +161,29 @@ class ProblemAccessTests {
                         .with(asUser(users, NORTH_INITIATOR_LOGIN)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void initiatorCannotReconcileOwnRequest() throws Exception {
+        RequestCard request = requests.create("1");
+
+        mvc.perform(post("/api/requests/{id}/reconcile", request.id()).header("Idempotency-Key", "k-1")
+                        .with(csrf()).with(asUser(users, NORTH_INITIATOR_LOGIN)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        assertThat(jdbc.sql("SELECT count(*) FROM reconciliation").query(Long.class).single()).isZero();
+    }
+
+    @Test
+    void othersCannotSeeTheRequestToReconcile() throws Exception {
+        RequestCard request = requests.create("1");
+
+        for (String login : new String[] {SOUTH_INITIATOR_LOGIN, SOUTH_OPERATOR_LOGIN}) {
+            mvc.perform(post("/api/requests/{id}/reconcile", request.id()).header("Idempotency-Key", "k-" + login)
+                            .with(csrf()).with(asUser(users, login)))
+                    .andExpect(status().isNotFound());
+        }
+        assertThat(jdbc.sql("SELECT count(*) FROM reconciliation").query(Long.class).single()).isZero();
     }
 
     @Test

@@ -147,6 +147,142 @@ class HttpCarrierClientTest {
                 .hasMessageContaining("no items");
     }
 
+    static final String OPERATION_PATH = "/operations/" + ID;
+    static final String EXECUTED = """
+            {"operationId":"%s","state":"EXECUTED","receivedAt":"2026-11-12T09:15:02Z",
+             "executedAt":"2026-11-12T09:15:03Z",
+             "result":{"messageId":"0195f3a2-8000-7a00-8b00-000000000002","operationId":"%s","sequence":2,
+                       "status":"SUCCEEDED","trackingNumber":"TRK-3F1C2B4D","price":612.50,"reason":null,
+                       "occurredAt":"2026-11-12T09:15:03Z"}}""".formatted(ID, ID);
+
+    @Test
+    void lookupReturnsAcceptedOperation() {
+        String body = "{\"operationId\":\"" + ID + "\",\"state\":\"ACCEPTED\",\"receivedAt\":\"2026-11-12T09:15:02Z\","
+                + "\"executedAt\":null,\"result\":null}";
+        respond(OPERATION_PATH, 200, body);
+
+        LookupResult result = client.lookup(ID);
+
+        assertThat(result).isInstanceOf(LookupResult.Found.class);
+        LookupResult.Found found = (LookupResult.Found) result;
+        assertThat(found.state()).isEqualTo("ACCEPTED");
+        assertThat(found.result()).isNull();
+        assertThat(found.raw()).isEqualTo(body);
+    }
+
+    @Test
+    void lookupReturnsExecutedOperationWithResult() {
+        respond(OPERATION_PATH, 200, EXECUTED);
+
+        LookupResult.Found found = (LookupResult.Found) client.lookup(ID);
+
+        assertThat(found.state()).isEqualTo("EXECUTED");
+        assertThat(found.result().get("trackingNumber").asString()).isEqualTo("TRK-3F1C2B4D");
+        assertThat(found.result().get("price").decimalValue()).isEqualByComparingTo("612.50");
+        assertThat(found.raw()).isEqualTo(EXECUTED);
+    }
+
+    @Test
+    void lookupNotFoundKeepsCarrierCodeAndMessage() {
+        String body = "{\"code\":\"OPERATION_NOT_FOUND\",\"message\":\"Operation " + ID + " is not known\"}";
+        respond(OPERATION_PATH, 404, body);
+
+        assertThat(client.lookup(ID)).isEqualTo(
+                new LookupResult.NotFound("OPERATION_NOT_FOUND", "Operation " + ID + " is not known", body));
+    }
+
+    @Test
+    void lookupNotFoundWithBrokenBody() {
+        respond(OPERATION_PATH, 404, "<html>nope</html>");
+
+        assertThat(client.lookup(ID)).isEqualTo(new LookupResult.NotFound(null, null, "<html>nope</html>"));
+    }
+
+    @Test
+    void lookupUnavailableThrows() {
+        respond(OPERATION_PATH, 503, "{\"code\":\"UNAVAILABLE\",\"message\":\"down\"}");
+        assertThatThrownBy(() -> client.lookup(ID)).isInstanceOf(CarrierUnavailableException.class)
+                .hasMessageContaining("503");
+
+        server.removeContext(OPERATION_PATH);
+        respond(OPERATION_PATH, 500, "boom");
+        assertThatThrownBy(() -> client.lookup(ID)).isInstanceOf(CarrierUnavailableException.class);
+    }
+
+    @Test
+    void lookupTimeoutThrows() {
+        server.createContext(OPERATION_PATH, exchange -> {
+            sleep(Duration.ofMillis(1500));
+            send(exchange, 200, EXECUTED);
+        });
+
+        assertThatThrownBy(() -> client.lookup(ID)).isInstanceOf(CarrierUnavailableException.class);
+    }
+
+    @Test
+    void lookupRefusedConnectionThrows() throws IOException {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        HttpCarrierClient unreachable = clientFor(URI.create("http://127.0.0.1:" + closedPort), Duration.ofMillis(500));
+
+        assertThatThrownBy(() -> unreachable.lookup(ID)).isInstanceOf(CarrierUnavailableException.class);
+    }
+
+    @Test
+    void lookupForeignOperationIsInvalid() {
+        UUID other = UUID.fromString("0195f3a2-7c41-7d10-9a5e-000000000000");
+        respond(OPERATION_PATH, 200, EXECUTED.replaceFirst(ID.toString(), other.toString()));
+
+        LookupResult.Invalid invalid = (LookupResult.Invalid) client.lookup(ID);
+
+        assertThat(invalid.reason()).contains(other.toString()).contains(ID.toString());
+        assertThat(invalid.raw()).contains(other.toString());
+    }
+
+    @Test
+    void lookupResultOfOtherOperationIsInvalid() {
+        UUID other = UUID.fromString("0195f3a2-7c41-7d10-9a5e-000000000000");
+        int last = EXECUTED.lastIndexOf(ID.toString());
+        respond(OPERATION_PATH, 200, EXECUTED.substring(0, last) + other + EXECUTED.substring(last + 36));
+
+        assertThat(((LookupResult.Invalid) client.lookup(ID)).reason()).contains("result").contains(other.toString());
+    }
+
+    @Test
+    void lookupUnknownStateIsInvalid() {
+        respond(OPERATION_PATH, 200, EXECUTED.replace("\"EXECUTED\"", "\"LOST\""));
+
+        assertThat(((LookupResult.Invalid) client.lookup(ID)).reason()).contains("state");
+    }
+
+    @Test
+    void lookupWithoutResultFieldIsInvalid() {
+        respond(OPERATION_PATH, 200, "{\"operationId\":\"" + ID + "\",\"state\":\"ACCEPTED\"}");
+
+        assertThat(((LookupResult.Invalid) client.lookup(ID)).reason()).contains("result");
+    }
+
+    @Test
+    void lookupNotJsonIsInvalid() {
+        respond(OPERATION_PATH, 200, "not json");
+
+        LookupResult.Invalid invalid = (LookupResult.Invalid) client.lookup(ID);
+        assertThat(invalid.reason()).contains("JSON");
+        assertThat(invalid.raw()).isEqualTo("not json");
+    }
+
+    @Test
+    void lookupUnexpectedStatusIsInvalid() {
+        respond(OPERATION_PATH, 400, "{\"code\":\"VALIDATION_FAILED\",\"message\":\"bad id\"}");
+
+        LookupResult.Invalid invalid = (LookupResult.Invalid) client.lookup(ID);
+        assertThat(invalid.reason()).contains("400");
+        assertThat(invalid.code()).isEqualTo("VALIDATION_FAILED");
+        assertThat(invalid.message()).isEqualTo("bad id");
+    }
+
     private void respond(String path, int status, String body) {
         server.createContext(path, exchange -> {
             lastBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));

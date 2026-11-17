@@ -10,6 +10,7 @@ public final class TestRows {
 
     public static void deleteRequestData(JdbcClient jdbc) {
         jdbc.sql("DELETE FROM problem").update();
+        jdbc.sql("DELETE FROM reconciliation").update();
         jdbc.sql("DELETE FROM idempotency_key").update();
         jdbc.sql("UPDATE dispatch_operation SET applied_inbox_id = NULL WHERE applied_inbox_id IS NOT NULL").update();
         jdbc.sql("DELETE FROM inbox").update();

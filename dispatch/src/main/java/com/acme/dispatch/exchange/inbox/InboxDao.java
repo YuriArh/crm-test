@@ -24,27 +24,53 @@ public class InboxDao {
         this.jdbc = jdbc;
     }
 
-    /** Counts a repeat of a known message; returns {@code false} if the message is new. */
-    boolean countDuplicate(String messageId, Instant now) {
+    /** Counts a repeat of a message known from this source; returns {@code false} if the message is new. */
+    boolean countDuplicate(InboxSource source, String messageId, Instant now) {
         return jdbc.sql("""
                         UPDATE inbox SET duplicate_count = duplicate_count + 1, last_duplicate_at = :now
-                         WHERE message_id = :messageId""")
+                         WHERE source = :source AND message_id = :messageId""")
                 .param("now", toSql(now))
+                .param("source", source.name())
                 .param("messageId", messageId)
                 .update() == 1;
     }
 
+    /** Locks a record until the transaction ends, waiting for a processor that holds it. */
+    void lockRecord(UUID inboxId) {
+        jdbc.sql("SELECT id FROM inbox WHERE id = :id FOR UPDATE")
+                .param("id", inboxId)
+                .query(UUID.class)
+                .single();
+    }
+
+    /** How a record stands now. */
+    public String statusOf(UUID inboxId) {
+        return jdbc.sql("SELECT processing_status FROM inbox WHERE id = :id")
+                .param("id", inboxId)
+                .query(String.class)
+                .single();
+    }
+
+    /** The record of this message from this source, if it was received. */
+    public Optional<UUID> findId(InboxSource source, String messageId) {
+        return jdbc.sql("SELECT id FROM inbox WHERE source = :source AND message_id = :messageId")
+                .param("source", source.name())
+                .param("messageId", messageId)
+                .query(UUID.class)
+                .optional();
+    }
+
     /**
      * Stores a received record, due for processing at once. Returns {@code false} if a record with the same message
-     * id was stored concurrently (then the caller counts it as a duplicate). A repeated feed position is not a
-     * duplicate but a broken invariant, so it fails ({@code inbox_feed_seq_unique}).
+     * id from the same source was stored concurrently (then the caller counts it as a duplicate). A repeated feed
+     * position is not a duplicate but a broken invariant, so it fails ({@code inbox_feed_seq_unique}).
      */
     boolean insertReceived(UUID id, String messageId, Long feedSeq, String payload, InboxSource source, Instant now) {
         return jdbc.sql("""
                         INSERT INTO inbox (id, message_id, feed_seq, payload, source, processing_status, attempts,
                                            next_attempt_at, received_at)
                         VALUES (:id, :messageId, :feedSeq, :payload, :source, 'RECEIVED', 0, :now, :now)
-                        ON CONFLICT (message_id) WHERE message_id IS NOT NULL DO NOTHING""")
+                        ON CONFLICT (source, message_id) WHERE message_id IS NOT NULL DO NOTHING""")
                 .param("id", id)
                 .param("messageId", messageId)
                 .param("feedSeq", feedSeq)
@@ -66,6 +92,21 @@ public class InboxDao {
                          LIMIT 1
                            FOR UPDATE SKIP LOCKED""")
                 .param("now", toSql(now))
+                .query((rs, row) -> new Pending(rs.getObject("id", UUID.class), rs.getString("message_id"),
+                        rs.getString("payload"), rs.getInt("attempts")))
+                .optional();
+    }
+
+    /**
+     * One record, locked until the transaction ends, if it still waits for processing. A record another processor
+     * holds is skipped: that processor decides it, and waiting for it under another lock could deadlock.
+     */
+    Optional<Pending> claimById(UUID id) {
+        return jdbc.sql("""
+                        SELECT id, message_id, payload, attempts FROM inbox
+                         WHERE id = :id AND processing_status = 'RECEIVED'
+                           FOR UPDATE SKIP LOCKED""")
+                .param("id", id)
                 .query((rs, row) -> new Pending(rs.getObject("id", UUID.class), rs.getString("message_id"),
                         rs.getString("payload"), rs.getInt("attempts")))
                 .optional();

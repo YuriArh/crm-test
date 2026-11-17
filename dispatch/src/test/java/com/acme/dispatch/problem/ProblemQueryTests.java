@@ -2,6 +2,7 @@ package com.acme.dispatch.problem;
 
 import static com.acme.dispatch.common.SqlTime.toSql;
 import static com.acme.dispatch.support.DemoData.NORTH_OPERATOR;
+import static com.acme.dispatch.support.DemoData.NORTH_INITIATOR_LOGIN;
 import static com.acme.dispatch.support.DemoData.NORTH_OPERATOR_LOGIN;
 import static com.acme.dispatch.support.TestClockConfiguration.START;
 import static com.acme.dispatch.support.TestFeed.entry;
@@ -26,6 +27,8 @@ import com.acme.dispatch.carrier.SubmitOutcome;
 import com.acme.dispatch.carrier.SubmitResult;
 import com.acme.dispatch.config.IdGenerator;
 import com.acme.dispatch.exchange.SendWorker;
+import com.acme.dispatch.exchange.reconcile.Reconciler;
+import com.acme.dispatch.exchange.reconcile.RunType;
 import com.acme.dispatch.request.RequestCard;
 import com.acme.dispatch.support.FakeCarrier;
 import com.acme.dispatch.support.IntegrationTest;
@@ -68,6 +71,8 @@ class ProblemQueryTests {
     MutableClock clock;
     @Autowired
     JdbcClient jdbc;
+    @Autowired
+    Reconciler reconciler;
 
     @BeforeEach
     void setUp() {
@@ -269,17 +274,133 @@ class ProblemQueryTests {
                 .andExpect(jsonPath("$.problems[*].kind", contains("DELIVERY_FAILED", "DELIVERY_UNKNOWN")))
                 .andExpect(jsonPath("$.problems[*].request.id",
                         containsInAnyOrder(request.id().toString(), request.id().toString())))
-                .andExpect(jsonPath("$.actions", contains("RETRY")));
+                .andExpect(jsonPath("$.actions", contains("RETRY", "RECONCILE")));
     }
 
     @Test
-    void acknowledgedRequestHasNoActions() throws Exception {
+    void acknowledgedRequestCanOnlyBeReconciled() throws Exception {
         RequestCard request = requests.create("1");
         worker.runOnce();
 
         mvc.perform(get("/api/requests/{id}", request.id()).with(asUser(users, NORTH_OPERATOR_LOGIN)))
                 .andExpect(jsonPath("$.problems", hasSize(0)))
+                .andExpect(jsonPath("$.actions", contains("RECONCILE")));
+    }
+
+    @Test
+    void reconciliationConflictShowsCarrierVersionAsMessage() throws Exception {
+        RequestCard request = withOurResult();
+        carrier.lookupAnswer(request.operationId(), FakeCarrier.executed(request.operationId(),
+                succeeded(9, request.operationId(), "TRK-00000002", "700.00")));
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+
+        mvc.perform(get("/api/problems").with(asUser(users, NORTH_OPERATOR_LOGIN)))
+                .andExpect(jsonPath("$.items[0].kind").value("RECONCILIATION_CONFLICT"))
+                .andExpect(jsonPath("$.items[0].message.feedSeq").value(nullValue()))
+                .andExpect(jsonPath("$.items[0].message.status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.items[0].message.sequence").value(2))
+                .andExpect(jsonPath("$.items[0].message.trackingNumber").value("TRK-00000002"))
+                .andExpect(jsonPath("$.items[0].message.price").value(700.0))
+                .andExpect(jsonPath("$.items[0].message.payloadExcerpt", containsString("\"state\":\"EXECUTED\"")))
+                .andExpect(jsonPath("$.items[0].currentResult.result.trackingNumber").value("TRK-00000001"))
+                .andExpect(jsonPath("$.items[0].actions", contains("APPLY_CARRIER", "KEEP_OURS")));
+    }
+
+    @Test
+    void conflictWithoutCarrierResultHasEmptyResultFields() throws Exception {
+        RequestCard request = withOurResult();
+        carrier.lookupAnswer(request.operationId(), FakeCarrier.accepted(request.operationId()));
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+
+        mvc.perform(get("/api/problems").with(asUser(users, NORTH_OPERATOR_LOGIN)))
+                .andExpect(jsonPath("$.items[0].kind").value("RECONCILIATION_CONFLICT"))
+                .andExpect(jsonPath("$.items[0].message.status").value(nullValue()))
+                .andExpect(jsonPath("$.items[0].message.trackingNumber").value(nullValue()))
+                .andExpect(jsonPath("$.items[0].message.payloadExcerpt", containsString("\"state\":\"ACCEPTED\"")))
+                .andExpect(jsonPath("$.items[0].details", containsString("no result")))
+                .andExpect(jsonPath("$.items[0].actions", contains("KEEP_OURS")));
+    }
+
+    @Test
+    void externalMissingShowsCurrentResult() throws Exception {
+        RequestCard request = withOurResult();
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+
+        mvc.perform(get("/api/problems").param("kind", "EXTERNAL_MISSING").with(asUser(users, NORTH_OPERATOR_LOGIN)))
+                .andExpect(jsonPath("$.items", hasSize(1)))
+                .andExpect(jsonPath("$.items[0].message").value(nullValue()))
+                .andExpect(jsonPath("$.items[0].currentResult.businessStatus").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.items[0].actions", contains("KEEP_OURS")));
+        mvc.perform(get("/api/requests/{id}", request.id()).with(asUser(users, NORTH_OPERATOR_LOGIN)))
+                .andExpect(jsonPath("$.actions", contains("RECONCILE")));
+    }
+
+    @Test
+    void lostOperationWithoutResultOffersRetry() throws Exception {
+        RequestCard request = requests.create("1");
+        worker.runOnce();
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+
+        mvc.perform(get("/api/requests/{id}", request.id()).with(asUser(users, NORTH_OPERATOR_LOGIN)))
+                .andExpect(jsonPath("$.problems[0].kind").value("EXTERNAL_MISSING"))
+                .andExpect(jsonPath("$.problems[0].actions", hasSize(0)))
+                .andExpect(jsonPath("$.actions", contains("RETRY", "RECONCILE")));
+    }
+
+    @Test
+    void operatorCardHasReconciliations() throws Exception {
+        RequestCard request = withOurResult();
+        carrier.lookupAnswer(request.operationId(), FakeCarrier.executed(request.operationId(),
+                succeeded(9, request.operationId(), "TRK-00000001", "325.00")));
+        for (int i = 0; i < 22; i++) {
+            clock.advance(Duration.ofMinutes(1));
+            reconciler.check(request.id(), RunType.SCHEDULED, null);
+        }
+        clock.advance(Duration.ofMinutes(1));
+        reconciler.check(request.id(), RunType.MANUAL, NORTH_OPERATOR);
+
+        mvc.perform(get("/api/requests/{id}", request.id()).with(asUser(users, NORTH_OPERATOR_LOGIN)))
+                .andExpect(jsonPath("$.reconciliations", hasSize(20)))
+                .andExpect(jsonPath("$.reconciliations[0].trigger").value("MANUAL"))
+                .andExpect(jsonPath("$.reconciliations[0].performedBy.displayName").value("Оператор (Север)"))
+                .andExpect(jsonPath("$.reconciliations[0].checkedAt").value("2026-11-12T09:23:00Z"))
+                .andExpect(jsonPath("$.reconciliations[0].outcome").value("MATCH"))
+                .andExpect(jsonPath("$.reconciliations[0].carrierState").value("EXECUTED"))
+                .andExpect(jsonPath("$.reconciliations[0].carrierResult.trackingNumber").value("TRK-00000001"))
+                .andExpect(jsonPath("$.reconciliations[0].carrierResult.price").value(325.0))
+                .andExpect(jsonPath("$.reconciliations[0].carrierResult.sequence").value(2))
+                .andExpect(jsonPath("$.reconciliations[0].details", containsString("Results match")))
+                .andExpect(jsonPath("$.reconciliations[1].trigger").value("SCHEDULED"))
+                .andExpect(jsonPath("$.reconciliations[1].performedBy").value(nullValue()));
+    }
+
+    @Test
+    void reconciliationWithoutAnswerHasNoCarrierSide() throws Exception {
+        RequestCard request = requests.create("1");
+        carrier.lookupUnavailable(true);
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+
+        mvc.perform(get("/api/requests/{id}", request.id()).with(asUser(users, NORTH_OPERATOR_LOGIN)))
+                .andExpect(jsonPath("$.reconciliations[0].outcome").value("ERROR"))
+                .andExpect(jsonPath("$.reconciliations[0].carrierState").value(nullValue()))
+                .andExpect(jsonPath("$.reconciliations[0].carrierResult").value(nullValue()));
+    }
+
+    @Test
+    void initiatorCardHasNoReconciliations() throws Exception {
+        RequestCard request = requests.create("1");
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+
+        mvc.perform(get("/api/requests/{id}", request.id()).with(asUser(users, NORTH_INITIATOR_LOGIN)))
+                .andExpect(jsonPath("$.reconciliations").doesNotExist())
                 .andExpect(jsonPath("$.actions", hasSize(0)));
+    }
+
+    private RequestCard withOurResult() {
+        RequestCard request = requests.create("1");
+        worker.runOnce();
+        results.deliver(succeeded(1, request.operationId(), "TRK-00000001", "325.00"));
+        return request;
     }
 
     /** {@code GET /api/problems/{id}} answers exactly the item of the list, for every kind (web-problems.md §3.1). */

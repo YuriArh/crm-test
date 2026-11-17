@@ -44,13 +44,19 @@ public class ProblemQueryDao {
                    p.request_id, r.number, r.business_status, r.tracking_number, r.price, r.rejection_reason,
                    r.result_at, coalesce(o.operation_id, i.operation_id) AS operation_id,
                    p.inbox_id, i.message_id, i.feed_seq, i.payload, i.result_status,
+                   p.reconciliation_id, rc.carrier_result_status, rc.carrier_tracking_number, rc.carrier_price,
+                   rc.carrier_reason, rc.carrier_sequence, rc.carrier_message_id, rc.carrier_occurred_at,
+                   rc.carrier_response,
                    p.resolved_by, u.display_name AS resolved_by_name
               FROM problem p
               LEFT JOIN delivery_request r ON r.id = p.request_id
               LEFT JOIN dispatch_operation o ON o.request_id = p.request_id
               LEFT JOIN inbox i ON i.id = p.inbox_id
+              LEFT JOIN reconciliation rc ON rc.id = p.reconciliation_id
               LEFT JOIN app_user u ON u.id = p.resolved_by
             """;
+    private static final Set<ProblemKind> SHOW_CURRENT_RESULT = Set.of(ProblemKind.RESULT_CONFLICT,
+            ProblemKind.RECONCILIATION_CONFLICT, ProblemKind.EXTERNAL_MISSING);
 
     private final JdbcClient jdbc;
 
@@ -117,6 +123,14 @@ public class ProblemQueryDao {
         UUID resolvedBy = rs.getObject("resolved_by", UUID.class);
         String decision = rs.getString("decision");
         String recordStatus = rs.getString("result_status");
+        String carrierResultStatus = rs.getString("carrier_result_status");
+        boolean carrierSideIsFinal = kind == ProblemKind.RECONCILIATION_CONFLICT
+                ? carrierResultStatus != null
+                : recordStatus != null && FINAL.contains(recordStatus);
+        boolean requestHasResult = FINAL.contains(String.valueOf(rs.getString("business_status")));
+        ExchangeProblem.Message message = rs.getObject("inbox_id", UUID.class) != null ? message(rs)
+                : rs.getObject("reconciliation_id", UUID.class) != null ? carrierAnswer(rs)
+                : null;
         return new ExchangeProblem(
                 rs.getObject("id", UUID.class),
                 kind,
@@ -127,12 +141,32 @@ public class ProblemQueryDao {
                 requestId == null ? null
                         : new ExchangeProblem.RequestRef(requestId, RequestNumber.format(rs.getLong("number"))),
                 rs.getObject("operation_id", UUID.class),
-                rs.getObject("inbox_id", UUID.class) == null ? null : message(rs),
-                kind == ProblemKind.RESULT_CONFLICT ? currentResult(rs) : null,
+                message,
+                SHOW_CURRENT_RESULT.contains(kind) ? currentResult(rs) : null,
                 resolvedBy == null ? null : new PersonRef(resolvedBy, rs.getString("resolved_by_name")),
                 decision == null ? null : ProblemDecision.valueOf(decision),
                 rs.getString("comment"),
-                ProblemRules.decisions(kind, status, recordStatus != null && FINAL.contains(recordStatus)));
+                ProblemRules.decisions(kind, status, carrierSideIsFinal, requestHasResult));
+    }
+
+    /**
+     * The carrier's side of a reconciliation conflict: its latest answer, linked to the problem. The result fields are
+     * {@code null} when the carrier has no result; it has no feed position.
+     */
+    private static ExchangeProblem.Message carrierAnswer(ResultSet rs) throws SQLException {
+        int value = rs.getInt("carrier_sequence");
+        Integer sequence = rs.wasNull() ? null : value;
+        String response = rs.getString("carrier_response");
+        return new ExchangeProblem.Message(
+                rs.getString("carrier_message_id"),
+                null,
+                rs.getString("carrier_result_status"),
+                sequence,
+                rs.getString("carrier_tracking_number"),
+                rs.getBigDecimal("carrier_price"),
+                rs.getString("carrier_reason"),
+                instant(rs, "carrier_occurred_at"),
+                response == null ? "" : SafeText.of(response, EXCERPT_LENGTH));
     }
 
     /** The record as far as it can be read: a field that does not parse is {@code null}. */

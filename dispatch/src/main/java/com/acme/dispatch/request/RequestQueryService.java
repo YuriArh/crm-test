@@ -2,14 +2,20 @@ package com.acme.dispatch.request;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import com.acme.dispatch.auth.CurrentUser;
 import com.acme.dispatch.common.BusinessCalendar;
 import com.acme.dispatch.common.web.ApiException;
 import com.acme.dispatch.common.web.PageResponse;
+import com.acme.dispatch.exchange.reconcile.ReconciliationQueryDao;
+import com.acme.dispatch.problem.ExchangeProblem;
+import com.acme.dispatch.problem.ProblemKind;
 import com.acme.dispatch.problem.ProblemQueryDao;
 import com.acme.dispatch.problem.ProblemRules;
+import com.acme.dispatch.problem.ProblemStatus;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,14 +24,20 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class RequestQueryService {
 
+    /** How many latest reconciliation checks the card shows. */
+    static final int CARD_RECONCILIATIONS = 20;
+
     private final RequestQueryDao dao;
     private final BusinessCalendar calendar;
     private final ProblemQueryDao problems;
+    private final ReconciliationQueryDao reconciliations;
 
-    public RequestQueryService(RequestQueryDao dao, BusinessCalendar calendar, ProblemQueryDao problems) {
+    public RequestQueryService(RequestQueryDao dao, BusinessCalendar calendar, ProblemQueryDao problems,
+                               ReconciliationQueryDao reconciliations) {
         this.dao = dao;
         this.calendar = calendar;
         this.problems = problems;
+        this.reconciliations = reconciliations;
     }
 
     /** One registry page; the page and the total are read in one snapshot. */
@@ -56,7 +68,16 @@ public class RequestQueryService {
         if (!viewer.isOperator()) {
             return card.forInitiator();
         }
-        return card.forOperator(problems.forRequest(id), ProblemRules.requestActions(card.deliveryStatus()));
+        List<ExchangeProblem> requestProblems = problems.forRequest(id);
+        Set<ProblemKind> open = requestProblems.stream()
+                .filter(problem -> problem.status() == ProblemStatus.OPEN)
+                .map(ExchangeProblem::kind)
+                .collect(Collectors.toUnmodifiableSet());
+        boolean hasResult = card.businessStatus() == BusinessStatus.SUCCEEDED
+                || card.businessStatus() == BusinessStatus.REJECTED;
+        return card.forOperator(requestProblems,
+                ProblemRules.requestActions(card.deliveryStatus(), open, hasResult),
+                reconciliations.forRequest(id, CARD_RECONCILIATIONS));
     }
 
     static ApiException notFound(Object id) {

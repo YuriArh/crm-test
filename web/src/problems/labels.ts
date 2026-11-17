@@ -29,6 +29,16 @@ export const KIND_VIEWS: Record<ProblemKind, KindView> = {
     hint: 'Перевозчик прислал итог, отличный от применённого',
     color: 'red',
   },
+  EXTERNAL_MISSING: {
+    label: 'Перевозчик не знает операцию',
+    hint: 'Он подтверждал приём, а теперь операции у него нет',
+    color: 'orange',
+  },
+  RECONCILIATION_CONFLICT: {
+    label: 'Расхождение при сверке',
+    hint: 'Итог перевозчика отличается от нашего',
+    color: 'red',
+  },
 };
 
 /** A kind newer than this client is shown by its code, so the screen never breaks. */

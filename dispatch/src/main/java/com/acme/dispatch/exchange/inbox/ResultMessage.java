@@ -90,6 +90,11 @@ public record ResultMessage(
 
     /** Business content of the result; two messages with the same sequence must have the same content. */
     public String content() {
+        return content(status, trackingNumber, price, reason);
+    }
+
+    /** The same canonical content from separate fields, e.g. a request's result, so both sides compare as equals. */
+    public static String content(String status, String trackingNumber, BigDecimal price, String reason) {
         return status + "|" + Objects.toString(trackingNumber, "") + "|"
                 + (price == null ? "" : price.stripTrailingZeros().toPlainString()) + "|" + Objects.toString(reason, "");
     }

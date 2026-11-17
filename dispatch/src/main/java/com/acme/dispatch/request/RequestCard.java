@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.UUID;
 
 import com.acme.dispatch.exchange.DeliveryStatus;
+import com.acme.dispatch.exchange.reconcile.ReconciliationView;
 import com.acme.dispatch.problem.ExchangeProblem;
 import com.acme.dispatch.problem.RequestAction;
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -18,6 +19,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * @param exchange technical exchange state; {@code null} (and omitted from JSON) for initiators
  * @param actions  operator actions the request's state allows now; empty for initiators
  * @param problems problems of the request, newest first; {@code null} (and omitted from JSON) for initiators
+ * @param reconciliations the latest reconciliation checks, newest first; {@code null} (and omitted) for initiators
  */
 public record RequestCard(
         UUID id,
@@ -39,24 +41,27 @@ public record RequestCard(
         long version,
         @JsonInclude(JsonInclude.Include.NON_NULL) ExchangeInfo exchange,
         List<RequestAction> actions,
-        @JsonInclude(JsonInclude.Include.NON_NULL) List<ExchangeProblem> problems) {
+        @JsonInclude(JsonInclude.Include.NON_NULL) List<ExchangeProblem> problems,
+        @JsonInclude(JsonInclude.Include.NON_NULL) List<ReconciliationView> reconciliations) {
 
     public RequestCard {
         actions = List.copyOf(actions);
         problems = problems == null ? null : List.copyOf(problems);
+        reconciliations = reconciliations == null ? null : List.copyOf(reconciliations);
     }
 
-    /** As an operator sees it: with its problems and the actions its state allows. */
-    RequestCard forOperator(List<ExchangeProblem> problems, List<RequestAction> actions) {
+    /** As an operator sees it: with its problems, its latest reconciliation checks and the actions its state allows. */
+    RequestCard forOperator(List<ExchangeProblem> problems, List<RequestAction> actions,
+                            List<ReconciliationView> reconciliations) {
         return new RequestCard(id, number, cargoDescription, weightKg, deliveryAddress, deadline, comment, owner,
                 assignee, businessStatus, result, deliveryStatus, operationId, overdue, createdAt, updatedAt, version,
-                exchange, actions, problems);
+                exchange, actions, problems, reconciliations);
     }
 
-    /** As an initiator sees it: no technical exchange state, no problems, no actions. */
+    /** As an initiator sees it: no technical exchange state, no problems, no reconciliation, no actions. */
     RequestCard forInitiator() {
         return new RequestCard(id, number, cargoDescription, weightKg, deliveryAddress, deadline, comment, owner,
                 assignee, businessStatus, result, deliveryStatus, operationId, overdue, createdAt, updatedAt, version,
-                null, List.of(), null);
+                null, List.of(), null, null);
     }
 }

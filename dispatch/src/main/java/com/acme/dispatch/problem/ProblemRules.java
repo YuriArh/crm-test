@@ -48,30 +48,47 @@ public final class ProblemRules {
     }
 
     /**
-     * Decisions an operator may take on a problem.
+     * Decisions an operator may take on a problem ({@code operator-problems.md} §2.4, {@code reconciliation.md} §2.7).
      *
-     * @param disputedRecordIsFinal for a result conflict: whether the disputed record is a final result; applying an
-     *                              intermediate one over a final result would roll the result back
+     * @param carrierSideIsFinal for a conflict: whether the carrier's side (the disputed record, the carrier's
+     *                           answer) is a final result; applying anything else over a final result would roll the
+     *                           result back
+     * @param requestHasResult   whether the request has a final result: then a lost operation keeps it, else the way
+     *                           out is a retry of the delivery
      */
-    public static List<ProblemDecision> decisions(ProblemKind kind, ProblemStatus status,
-                                                  boolean disputedRecordIsFinal) {
+    public static List<ProblemDecision> decisions(ProblemKind kind, ProblemStatus status, boolean carrierSideIsFinal,
+                                                  boolean requestHasResult) {
         if (status != ProblemStatus.OPEN) {
             return List.of();
         }
         return switch (kind) {
-            case RESULT_CONFLICT -> disputedRecordIsFinal
+            case RESULT_CONFLICT, RECONCILIATION_CONFLICT -> carrierSideIsFinal
                     ? List.of(ProblemDecision.APPLY_CARRIER, ProblemDecision.KEEP_OURS)
                     : List.of(ProblemDecision.KEEP_OURS);
             case INVALID_MESSAGE, MESSAGE_FAILED -> List.of(ProblemDecision.ACKNOWLEDGED);
+            case EXTERNAL_MISSING -> requestHasResult ? List.of(ProblemDecision.KEEP_OURS) : List.of();
             case DELIVERY_UNKNOWN, DELIVERY_FAILED -> List.of();
         };
     }
 
-    /** Actions on a request its delivery status allows. */
-    public static List<RequestAction> requestActions(DeliveryStatus status) {
+    /**
+     * Actions on a request an operator may take now: «Повторить отправку» while delivery failed or is unknown, or
+     * while the carrier lost an acknowledged operation that has no result yet; «Сверить сейчас» always.
+     *
+     * @param openProblems kinds of the request's open problems
+     */
+    public static List<RequestAction> requestActions(DeliveryStatus status, Set<ProblemKind> openProblems,
+                                                     boolean hasResult) {
+        return canRetry(status, openProblems, hasResult)
+                ? List.of(RequestAction.RETRY, RequestAction.RECONCILE)
+                : List.of(RequestAction.RECONCILE);
+    }
+
+    /** Whether «Повторить отправку» is allowed; the same rule guards the action itself under the row lock. */
+    public static boolean canRetry(DeliveryStatus status, Set<ProblemKind> openProblems, boolean hasResult) {
         return status == DeliveryStatus.FAILED || status == DeliveryStatus.UNKNOWN
-                ? List.of(RequestAction.RETRY)
-                : List.of();
+                || (status == DeliveryStatus.ACKNOWLEDGED && openProblems.contains(ProblemKind.EXTERNAL_MISSING)
+                        && !hasResult);
     }
 
     /** Problems to open and to close. */

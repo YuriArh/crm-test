@@ -23,6 +23,12 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param inboxMaxAttempts      attempts to process a received result before it becomes {@code FAILED}
  * @param inboxInitialBackoff   pause before the second processing attempt; doubles with every attempt
  * @param inboxMaxBackoff       upper bound of that pause
+ * @param reconcileInterval     pause between background reconciliation passes
+ * @param reconcileThreshold    how long an operation stays UNKNOWN, or acknowledged without a result, before the
+ *                              background reconciles it
+ * @param reconcilePause        pause before the next check of an operation; doubles while the answer stays the same
+ * @param reconcilePauseMax     upper bound of that pause
+ * @param reconcilePerPass      most operations checked in one background pass
  */
 @ConfigurationProperties(prefix = "app.exchange")
 public record ExchangeProperties(
@@ -36,5 +42,10 @@ public record ExchangeProperties(
         @DefaultValue("30s") Duration feedMaxBackoff,
         @DefaultValue("5") int inboxMaxAttempts,
         @DefaultValue("1s") Duration inboxInitialBackoff,
-        @DefaultValue("1m") Duration inboxMaxBackoff) {
+        @DefaultValue("1m") Duration inboxMaxBackoff,
+        @DefaultValue("1m") Duration reconcileInterval,
+        @DefaultValue("2m") Duration reconcileThreshold,
+        @DefaultValue("5m") Duration reconcilePause,
+        @DefaultValue("1h") Duration reconcilePauseMax,
+        @DefaultValue("100") int reconcilePerPass) {
 }

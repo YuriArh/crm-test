@@ -4,9 +4,12 @@ import static com.acme.dispatch.common.SqlTime.toSql;
 import static com.acme.dispatch.support.DemoData.NORTH_OPERATOR;
 import static com.acme.dispatch.support.DemoData.NORTH_OPERATOR_LOGIN;
 import static com.acme.dispatch.support.TestClockConfiguration.START;
+import static com.acme.dispatch.support.TestFeed.succeeded;
 import static com.acme.dispatch.support.TestSecurity.asUser;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -23,11 +26,14 @@ import com.acme.dispatch.carrier.SubmitOutcome;
 import com.acme.dispatch.carrier.SubmitResult;
 import com.acme.dispatch.exchange.ExchangeProperties;
 import com.acme.dispatch.exchange.SendWorker;
+import com.acme.dispatch.exchange.reconcile.Reconciler;
+import com.acme.dispatch.exchange.reconcile.RunType;
 import com.acme.dispatch.request.RequestCard;
 import com.acme.dispatch.support.FakeCarrier;
 import com.acme.dispatch.support.IntegrationTest;
 import com.acme.dispatch.support.MutableClock;
 import com.acme.dispatch.support.TestRequests;
+import com.acme.dispatch.support.TestResults;
 import com.acme.dispatch.support.TestRows;
 
 import org.junit.jupiter.api.AfterEach;
@@ -62,6 +68,10 @@ class RetryActionTests {
     MutableClock clock;
     @Autowired
     JdbcClient jdbc;
+    @Autowired
+    Reconciler reconciler;
+    @Autowired
+    TestResults results;
 
     @BeforeEach
     void setUp() {
@@ -85,7 +95,7 @@ class RetryActionTests {
                 .andExpect(jsonPath("$.id").value(request.id().toString()))
                 .andExpect(jsonPath("$.deliveryStatus").value("PENDING"))
                 .andExpect(jsonPath("$.operationId").value(request.operationId().toString()))
-                .andExpect(jsonPath("$.actions", hasSize(0)))
+                .andExpect(jsonPath("$.actions", contains("RECONCILE")))
                 .andExpect(jsonPath("$.problems[0].kind").value("DELIVERY_FAILED"))
                 .andExpect(jsonPath("$.problems[0].status").value("RESOLVED"))
                 .andExpect(jsonPath("$.problems[0].decision").value("RETRIED"))
@@ -140,6 +150,62 @@ class RetryActionTests {
                 .param("id", sending.id())
                 .update();
         expectRefused(sending, "SENDING");
+    }
+
+    /** reconciliation.md §2.7: the carrier lost an acknowledged operation that has no result — send it again. */
+    @Test
+    void retryAcknowledgedWithExternalMissing() throws Exception {
+        RequestCard request = requests.create("1");
+        worker.runOnce();
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+        assertThat(problems(request)).containsExactly("EXTERNAL_MISSING:OPEN:-");
+        clock.set(START.plusSeconds(30));
+
+        retry(request, "k-1")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.deliveryStatus").value("PENDING"))
+                .andExpect(jsonPath("$.exchange.acknowledgedAt").value(nullValue()))
+                .andExpect(jsonPath("$.exchange.acknowledgedVia").value(nullValue()));
+
+        assertThat(operation(request)).isEqualTo("PENDING|1|1|2026-11-12 09:00:30+00|-");
+        assertThat(problems(request)).containsExactly("EXTERNAL_MISSING:RESOLVED:RETRIED");
+        assertThat(reconcileTimes(request)).isEqualTo("-");
+        worker.runOnce();
+        assertThat(carrier.submitted()).hasSize(2);
+        assertThat(carrier.submitted().get(1).operationId()).isEqualTo(request.operationId());
+    }
+
+    @Test
+    void retryAcknowledgedWithResultIs409() throws Exception {
+        RequestCard request = requests.create("1");
+        worker.runOnce();
+        results.deliver(succeeded(1, request.operationId(), "TRK-00000001", "612.50"));
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+        assertThat(problems(request)).containsExactly("EXTERNAL_MISSING:OPEN:-");
+
+        expectRefused(request, "ACKNOWLEDGED");
+        assertThat(problems(request)).containsExactly("EXTERNAL_MISSING:OPEN:-");
+    }
+
+    @Test
+    void retryAcknowledgedWithoutProblemIs409() throws Exception {
+        RequestCard request = requests.create("1");
+        worker.runOnce();
+
+        expectRefused(request, "ACKNOWLEDGED");
+    }
+
+    @Test
+    void retryFailedClearsReconcileTimes() throws Exception {
+        RequestCard request = requests.create("1");
+        carrier.answer(PERMANENT);
+        worker.runOnce();
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+        assertThat(reconcileTimes(request)).isNotEqualTo("-");
+
+        retry(request, "k-1").andExpect(status().isOk());
+
+        assertThat(reconcileTimes(request)).isEqualTo("-");
     }
 
     @Test
@@ -276,6 +342,16 @@ class RetryActionTests {
         return jdbc.sql("""
                         SELECT delivery_status || '|' || attempts || '|' || retry_from || '|' || next_attempt_at
                                || '|' || coalesce(last_error, '-')
+                          FROM dispatch_operation WHERE request_id = :id""")
+                .param("id", request.id())
+                .query(String.class)
+                .single();
+    }
+
+    /** {@code reconciled_at/next_reconcile_at}, or {@code -} when both are empty. */
+    private String reconcileTimes(RequestCard request) {
+        return jdbc.sql("""
+                        SELECT coalesce(reconciled_at || '/' || next_reconcile_at, '-')
                           FROM dispatch_operation WHERE request_id = :id""")
                 .param("id", request.id())
                 .query(String.class)

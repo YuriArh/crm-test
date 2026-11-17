@@ -11,5 +11,9 @@ public enum ProblemKind {
     /** A received record FAILED: we could not process it. */
     MESSAGE_FAILED,
     /** A received record was a CONFLICT with the applied result. */
-    RESULT_CONFLICT
+    RESULT_CONFLICT,
+    /** Reconciliation: the carrier does not know an operation it acknowledged ({@code reconciliation.md} §2.5). */
+    EXTERNAL_MISSING,
+    /** Reconciliation: our result differs from the carrier's, or only we have one. */
+    RECONCILIATION_CONFLICT
 }

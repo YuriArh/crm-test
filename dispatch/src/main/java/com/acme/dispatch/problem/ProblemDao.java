@@ -7,6 +7,8 @@ import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.acme.dispatch.exchange.inbox.ResultMessage;
+
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -38,6 +40,67 @@ public class ProblemDao {
                 .update() == 1;
     }
 
+    /** Opens a reconciliation conflict of a request, linked to the check that found it, unless one is open. */
+    public boolean openReconciliationConflict(UUID id, UUID requestId, UUID reconciliationId, String details,
+                                              Instant now) {
+        return jdbc.sql("""
+                        INSERT INTO problem (id, kind, status, request_id, reconciliation_id, details, opened_at)
+                        VALUES (:id, 'RECONCILIATION_CONFLICT', 'OPEN', :requestId, :reconciliationId, :details, :now)
+                        ON CONFLICT DO NOTHING""")
+                .param("id", id)
+                .param("requestId", requestId)
+                .param("reconciliationId", reconciliationId)
+                .param("details", details)
+                .param("now", toSql(now))
+                .update() == 1;
+    }
+
+    /**
+     * Points the request's open reconciliation conflict at a newer check, so it shows the carrier's latest answer.
+     * Returns whether one was open.
+     */
+    public boolean relinkOpenReconciliationConflict(UUID requestId, UUID reconciliationId, String details) {
+        return jdbc.sql("""
+                        UPDATE problem SET reconciliation_id = :reconciliationId, details = :details
+                         WHERE request_id = :requestId AND kind = 'RECONCILIATION_CONFLICT' AND status = 'OPEN'""")
+                .param("reconciliationId", reconciliationId)
+                .param("details", details)
+                .param("requestId", requestId)
+                .update() == 1;
+    }
+
+    /** The request's newest reconciliation conflict with the answer it was about, if it ever had one. */
+    public Optional<LastConflict> lastReconciliationConflict(UUID requestId) {
+        return jdbc.sql("""
+                        SELECT p.id, p.status, p.decision, r.carrier_result_status, r.carrier_tracking_number,
+                               r.carrier_price, r.carrier_reason, r.local_result
+                          FROM problem p
+                          JOIN reconciliation r ON r.id = p.reconciliation_id
+                         WHERE p.request_id = :requestId AND p.kind = 'RECONCILIATION_CONFLICT'
+                         ORDER BY p.opened_at DESC, p.id DESC
+                         LIMIT 1""")
+                .param("requestId", requestId)
+                .query((rs, row) -> new LastConflict(rs.getObject("id", UUID.class),
+                        ProblemStatus.valueOf(rs.getString("status")),
+                        rs.getString("decision") == null ? null : ProblemDecision.valueOf(rs.getString("decision")),
+                        rs.getString("carrier_result_status") == null ? null
+                                : ResultMessage.content(rs.getString("carrier_result_status"),
+                                        rs.getString("carrier_tracking_number"), rs.getBigDecimal("carrier_price"),
+                                        rs.getString("carrier_reason")),
+                        rs.getString("local_result")))
+                .optional();
+    }
+
+    /**
+     * A reconciliation conflict and the two sides it was about.
+     *
+     * @param carrierContent the carrier's result in canonical form, or {@code null} if it had none
+     * @param localResult    ours, in the same form
+     */
+    public record LastConflict(UUID id, ProblemStatus status, ProblemDecision decision, String carrierContent,
+                               String localResult) {
+    }
+
     /** Closes the request's open problem of this kind with an operator's decision. Returns whether it did. */
     public boolean closeByOperator(UUID requestId, ProblemKind kind, ProblemDecision decision, UUID operatorId,
                                    String comment, Instant now) {
@@ -66,6 +129,16 @@ public class ProblemDao {
                 .param("comment", comment)
                 .param("id", problemId)
                 .update() == 1;
+    }
+
+    /** The carrier's answer a reconciliation conflict shows now (its linked check), if it is one. */
+    public Optional<String> carrierAnswerOf(UUID problemId) {
+        return jdbc.sql("""
+                        SELECT r.carrier_response FROM problem p JOIN reconciliation r ON r.id = p.reconciliation_id
+                         WHERE p.id = :id AND r.carrier_response IS NOT NULL""")
+                .param("id", problemId)
+                .query(String.class)
+                .optional();
     }
 
     /** The record a problem is about, if it is a record problem. */

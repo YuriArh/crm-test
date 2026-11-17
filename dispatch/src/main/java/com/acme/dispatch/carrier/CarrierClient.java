@@ -1,6 +1,7 @@
 package com.acme.dispatch.carrier;
 
 import java.util.List;
+import java.util.UUID;
 
 import tools.jackson.databind.JsonNode;
 
@@ -17,4 +18,11 @@ public interface CarrierClient {
      * @throws CarrierUnavailableException if the feed cannot be read now
      */
     List<JsonNode> results(long after, int limit);
+
+    /**
+     * Asks the carrier what it knows about an operation (reconciliation).
+     *
+     * @throws CarrierUnavailableException if the carrier cannot answer now (no connection, timeout, 5xx)
+     */
+    LookupResult lookup(UUID operationId);
 }
