@@ -142,14 +142,17 @@ patch() {
 echo "Seeding demo data at $API"
 for user in north.initiator south.initiator north.operator; do login "$user"; done
 
+# Every request of the seed as "author|key|id" (id empty when the key was used another day), for the summary.
 ids=()
-n1=$(create north.initiator seed-north-1 "Паллеты с плиткой"      480     "Северная ул., 12"            5);  ids+=("north.initiator:$n1")
-n2=$(create north.initiator seed-north-2 "Офисная мебель"          95.5    "пр. Мира, 7, офис 3"         3);  ids+=("north.initiator:$n2")
-n3=$(create north.initiator seed-north-3 "Станок токарный"         12500   "Промзона Северная, корп. 4"  10); ids+=("north.initiator:$n3")
-n4=$(create north.initiator seed-north-4 "Документы"               0.5     "тест-отказ, ул. Нет, 0"      1);  ids+=("north.initiator:$n4")
-s1=$(create south.initiator seed-south-1 "Фрукты, 40 ящиков"       320     "Южная ул., 3"                2);  ids+=("south.initiator:$s1")
-s2=$(create south.initiator seed-south-2 "Стройматериалы"          2300    "пос. Солнечный, д. 15"       14); ids+=("south.initiator:$s2")
-s3=$(create south.initiator seed-south-3 "Генератор дизельный"     10500   "Морской порт, причал 2"      7);  ids+=("south.initiator:$s3")
+track() { ids+=("$1|$2|$3"); }
+
+n1=$(create north.initiator seed-north-1 "Паллеты с плиткой"      480     "Северная ул., 12"            5);  track north.initiator seed-north-1 "$n1"
+n2=$(create north.initiator seed-north-2 "Офисная мебель"          95.5    "пр. Мира, 7, офис 3"         3);  track north.initiator seed-north-2 "$n2"
+n3=$(create north.initiator seed-north-3 "Станок токарный"         12500   "Промзона Северная, корп. 4"  10); track north.initiator seed-north-3 "$n3"
+n4=$(create north.initiator seed-north-4 "Документы"               0.5     "тест-отказ, ул. Нет, 0"      1);  track north.initiator seed-north-4 "$n4"
+s1=$(create south.initiator seed-south-1 "Фрукты, 40 ящиков"       320     "Южная ул., 3"                2);  track south.initiator seed-south-1 "$s1"
+s2=$(create south.initiator seed-south-2 "Стройматериалы"          2300    "пос. Солнечный, д. 15"       14); track south.initiator seed-south-2 "$s2"
+s3=$(create south.initiator seed-south-3 "Генератор дизельный"     10500   "Морской порт, причал 2"      7);  track south.initiator seed-south-3 "$s3"
 
 # The operator takes two North requests; the initiator leaves a comment on another one.
 operator=$(call north.operator "$API/api/auth/me" | sed '$d' | jq -r .id)
@@ -159,7 +162,8 @@ operator=$(call north.operator "$API/api/auth/me" | sed '$d' | jq -r .id)
 
 # Fault modes are global: no request above may still be on its way when one is switched on.
 for entry in "${ids[@]}"; do
-  [ -n "${entry#*:}" ] && final_card "${entry%%:*}" "${entry#*:}" >/dev/null
+  IFS='|' read -r user _ id <<<"$entry"
+  [ -z "$id" ] || final_card "$user" "$id" >/dev/null
 done
 
 # scenario <key> "<modes>" <jq point> <what> <cargo> <weight> <address> <days> [after]: a North request created
@@ -172,7 +176,7 @@ scenario() {
   read -ra modes <<<"$2"
   set_faults "${modes[@]}"
   id=$(create north.initiator "$key" "$5" "$6" "$7" "$8")
-  [ -z "$id" ] || ids+=("north.initiator:$id")
+  track north.initiator "$key" "$id"
   if existed "$key"; then
     faults_off
     [ -z "$id" ] || echo "  $key: created before this run, not replayed — $(call north.operator "$API/api/requests/$id" | sed '$d' | jq -r "$STATE")"
@@ -215,11 +219,27 @@ reconcile_now() {
 scenario seed-north-8 "malformed" '.businessStatus == "IN_PROGRESS"' "the spoiled result to be read" \
   "Электроника, 12 коробок" 150 "Технопарк, стр. 3" 3 reconcile_now
 
-echo "Created requests and their outcomes:"
-for entry in "${ids[@]}"; do
-  user=${entry%%:*}; id=${entry#*:}
-  [ -n "$id" ] || continue
-  final_card "$user" "$id" | jq -r --arg u "$user" \
-    '"  \(.number)  \($u)  \(.businessStatus)  \(.result.trackingNumber // .result.rejectionReason)"'
-done
+# The summary (docs/specs/demo-seed.md §2.4). North cards are read as the operator, who sees the delivery and
+# the problems; South cards as their initiator (no operator of South exists), so they show no problems.
+echo "Requests of the seed:"
+{
+  printf 'Number\tKey\tAuthor\tResult\tTracking / reason\tDelivery\tOpen problems\n'
+  for entry in "${ids[@]}"; do
+    IFS='|' read -r user key id <<<"$entry"
+    if [ -z "$id" ]; then
+      printf -- '—\t%s\t%s\tcreated another day, not shown\t\t\t\n' "$key" "$user"
+      continue
+    fi
+    reader=$user
+    [ "$user" != north.initiator ] || reader=north.operator
+    final_card "$reader" "$id" | jq -r --arg key "$key" --arg u "$user" '[
+      .number, $key, $u, .businessStatus,
+      (.result.trackingNumber // .result.rejectionReason // "—"),
+      .deliveryStatus,
+      (if .problems == null then "—"
+       else [.problems[] | select(.status == "OPEN") | .kind] | if length == 0 then "none" else join(", ") end end)
+    ] | @tsv'
+  done
+} | column -t -s $'\t' | sed 's/^/  /'
+echo "Every operation is executed by the carrier once: make carrier-ops shows executionCount = 1 for each."
 echo "Done. Sign in at the web client as north.initiator / north.operator / south.initiator (password $PASSWORD)."
