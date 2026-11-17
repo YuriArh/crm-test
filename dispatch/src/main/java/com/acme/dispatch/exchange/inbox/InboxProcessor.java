@@ -140,7 +140,7 @@ public class InboxProcessor {
         return switch (ResultRules.decide(target.get().lastAppliedSequence(), appliedSameSeq, target.get().isFinal(),
                 message)) {
             case APPLIED -> {
-                inbox.applyToRequest(requestId, message, now);
+                inbox.applyToRequest(requestId, message, ResultOrigin.record(record.id()), now);
                 boolean acknowledged = inbox.applyToOperation(message.operationId(), message.sequence(), record.id(),
                         now);
                 yield new Outcome(Decision.APPLIED, null, message, requestId, acknowledged);

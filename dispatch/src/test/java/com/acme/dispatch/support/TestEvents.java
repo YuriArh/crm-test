@@ -27,6 +27,16 @@ public final class TestEvents {
                 .list();
     }
 
+    /** The record and the problem of each event, as {@code <inbox|->/<problem|->}, oldest first. */
+    public static List<String> links(JdbcClient jdbc, UUID requestId) {
+        return jdbc.sql("""
+                        SELECT coalesce(inbox_id::text, '-') || '/' || coalesce(problem_id::text, '-')
+                          FROM request_event WHERE request_id = :id ORDER BY occurred_at, version NULLS LAST, id""")
+                .param("id", requestId)
+                .query(String.class)
+                .list();
+    }
+
     private static String describe(List<Change> changes) {
         return changes.stream().map(change -> change.field() + ": " + change.from() + " → " + change.to())
                 .toList().toString();

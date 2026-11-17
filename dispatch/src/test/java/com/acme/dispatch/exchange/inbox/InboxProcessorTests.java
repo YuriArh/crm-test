@@ -1,7 +1,9 @@
 package com.acme.dispatch.exchange.inbox;
 
 import static com.acme.dispatch.support.TestClockConfiguration.START;
+import static com.acme.dispatch.support.TestFeed.entry;
 import static com.acme.dispatch.support.TestFeed.inProgress;
+import static com.acme.dispatch.support.TestFeed.rejected;
 import static com.acme.dispatch.support.TestFeed.succeeded;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -21,8 +23,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
+import com.acme.dispatch.history.RequestEventDao;
 import com.acme.dispatch.request.RequestCard;
 import com.acme.dispatch.support.IntegrationTest;
+import com.acme.dispatch.support.TestEvents;
 import com.acme.dispatch.support.MutableClock;
 import com.acme.dispatch.support.TestRequests;
 import com.acme.dispatch.support.TestResults;
@@ -43,6 +47,8 @@ class InboxProcessorTests {
     InboxProcessor processor;
     @Autowired
     InboxDao dao;   // a spy, see IntegrationTest
+    @Autowired
+    RequestEventDao events;   // a spy, see IntegrationTest
     @Autowired
     TestResults results;
     @Autowired
@@ -84,7 +90,7 @@ class InboxProcessorTests {
         RequestCard next = requests.create("2");
         doThrow(new DataIntegrityViolationException("simulated: numeric field overflow"))
                 .doCallRealMethod()
-                .when(dao).applyToRequest(any(), any(), any());
+                .when(dao).applyToRequest(any(), any(), any(), any());
         UUID bad = results.receive(succeeded(1, rejected.operationId(), "TRK-00000001", "325.00")).orElseThrow();
         UUID good = results.receive(succeeded(2, next.operationId(), "TRK-00000002", "350.00")).orElseThrow();
 
@@ -104,7 +110,7 @@ class InboxProcessorTests {
         doThrow(new IllegalStateException("simulated glitch"))
                 .doThrow(new IllegalStateException("simulated glitch"))
                 .doCallRealMethod()
-                .when(dao).applyToRequest(any(), any(), any());
+                .when(dao).applyToRequest(any(), any(), any(), any());
         UUID id = results.receive(inProgress(1, request.operationId())).orElseThrow();
 
         processor.processDue();
@@ -137,7 +143,7 @@ class InboxProcessorTests {
                 throw new IllegalStateException("simulated bug");
             }
             return invocation.callRealMethod();
-        }).when(dao).applyToRequest(any(), any(), any());
+        }).when(dao).applyToRequest(any(), any(), any(), any());
         UUID id = results.receive(inProgress(1, failing.operationId())).orElseThrow();
         UUID otherId = results.receive(inProgress(2, other.operationId())).orElseThrow();
 
@@ -161,7 +167,7 @@ class InboxProcessorTests {
     void failureThatCannotEvenBeRecordedStopsThePassWithoutCountingTheAttempt() {
         RequestCard request = requests.create("1");
         doThrow(new IllegalStateException("simulated: database is gone")).doCallRealMethod()
-                .when(dao).applyToRequest(any(), any(), any());
+                .when(dao).applyToRequest(any(), any(), any(), any());
         doThrow(new IllegalStateException("simulated: database is gone")).doCallRealMethod()
                 .when(dao).recordRetry(any(), anyInt(), any(), any());
         UUID id = results.receive(inProgress(1, request.operationId())).orElseThrow();
@@ -255,7 +261,7 @@ class InboxProcessorTests {
     @Test
     void failedRecordHasProcessedAt() {
         RequestCard request = requests.create("1");
-        doThrow(new IllegalStateException("simulated bug")).when(dao).applyToRequest(any(), any(), any());
+        doThrow(new IllegalStateException("simulated bug")).when(dao).applyToRequest(any(), any(), any(), any());
         UUID id = results.receive(inProgress(1, request.operationId())).orElseThrow();
 
         processor.processDue();
@@ -272,13 +278,85 @@ class InboxProcessorTests {
     void retriedRecordIsNotProcessedYet() {
         RequestCard request = requests.create("1");
         doThrow(new IllegalStateException("simulated glitch")).doCallRealMethod()
-                .when(dao).applyToRequest(any(), any(), any());
+                .when(dao).applyToRequest(any(), any(), any(), any());
         UUID id = results.receive(inProgress(1, request.operationId())).orElseThrow();
 
         processor.processDue();
 
         assertThat(results.status(id)).isEqualTo("RECEIVED");
         assertThat(results.processedAt(id)).isNull();
+    }
+
+    @Test
+    void appliedResultIsRecorded() {
+        RequestCard request = requests.create("1");
+        UUID first = results.receive(inProgress(1, request.operationId())).orElseThrow();
+        UUID second = results.receive(succeeded(2, request.operationId(), "TRK-00000001", "325.00")).orElseThrow();
+
+        processor.processDue();
+
+        assertThat(TestEvents.of(jdbc, request.id())).containsExactly(
+                "RESULT_CHANGED v1 by system [businessStatus: AWAITING → IN_PROGRESS]",
+                "RESULT_CHANGED v2 by system [businessStatus: IN_PROGRESS → SUCCEEDED, trackingNumber: null → "
+                        + "TRK-00000001, price: null → 325]");
+        assertThat(TestEvents.links(jdbc, request.id())).containsExactly(first + "/-", second + "/-");
+    }
+
+    @Test
+    void rejectedResultIsRecorded() {
+        RequestCard request = requests.create("1");
+
+        results.deliver(rejected(1, request.operationId(), "Address is not served"));
+
+        assertThat(TestEvents.of(jdbc, request.id())).containsExactly("RESULT_CHANGED v1 by system "
+                + "[businessStatus: AWAITING → REJECTED, rejectionReason: null → Address is not served]");
+    }
+
+    @Test
+    void sameResultKeepsVersion() {
+        RequestCard request = requests.create("1");
+        results.deliver(inProgress(1, request.operationId()));
+
+        UUID again = results.receive(entry(2, UUID.randomUUID().toString(), request.operationId(), 2, "IN_PROGRESS",
+                null, null, null)).orElseThrow();
+        processor.processDue();
+
+        assertThat(results.status(again)).isEqualTo("APPLIED");
+        assertThat(appliedRecord(request)).isEqualTo(again);
+        assertThat(version(request)).as("nothing changed in the request").isEqualTo(1);
+        assertThat(TestEvents.of(jdbc, request.id())).hasSize(1);
+    }
+
+    @Test
+    void staleAndConflictAreNotRecorded() {
+        RequestCard request = requests.create("1");
+        results.deliver(succeeded(1, request.operationId(), "TRK-00000001", "325.00"));
+
+        assertThat(results.deliver(inProgress(2, request.operationId()))).isEqualTo("STALE");
+        assertThat(results.deliver(succeeded(3, request.operationId(), "TRK-00000002", "400.00")))
+                .isEqualTo("CONFLICT");
+
+        assertThat(TestEvents.of(jdbc, request.id())).hasSize(1);
+    }
+
+    @Test
+    void refusedEventIsRetriedNotInvalid() {
+        RequestCard request = requests.create("1");
+        doThrow(new IllegalStateException("simulated: event refused")).doCallRealMethod()
+                .when(events).insert(any());
+        UUID id = results.receive(inProgress(1, request.operationId())).orElseThrow();
+
+        processor.processDue();
+
+        assertThat(results.status(id)).isEqualTo("RECEIVED");
+        assertThat(attempts(id)).isEqualTo(1);
+        assertThat(businessStatus(request)).as("the change is rolled back with its event").isEqualTo("AWAITING");
+        assertThat(version(request)).isZero();
+
+        clock.advance(Duration.ofSeconds(1));
+        processor.processDue();
+        assertThat(results.status(id)).isEqualTo("APPLIED");
+        assertThat(TestEvents.of(jdbc, request.id())).hasSize(1);
     }
 
     private UUID appliedRecord(RequestCard request) {

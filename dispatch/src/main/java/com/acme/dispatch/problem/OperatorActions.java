@@ -87,7 +87,7 @@ public class OperatorActions {
                     }
                     Instant now = calendar.now();
                     if (body.decision() == ProblemDecision.APPLY_CARRIER) {
-                        applyCarrier(problem, now);
+                        applyCarrier(problem, user.id(), now);
                     }
                     if (!problems.closeById(problemId, body.decision(), user.id(), body.comment(), now)) {
                         throw invalidDecision(problem, body.decision());
@@ -124,16 +124,16 @@ public class OperatorActions {
      * carrier's answer a reconciliation conflict shows now — which may have changed since the operator saw it, so a
      * missing final result there is {@code 409}.
      */
-    private void applyCarrier(ExchangeProblem problem, Instant now) {
+    private void applyCarrier(ExchangeProblem problem, UUID operatorId, Instant now) {
         if (problem.kind() == ProblemKind.RECONCILIATION_CONFLICT) {
             String answer = problems.carrierAnswerOf(problem.id()).orElse(null);
             if (answer == null || !results.applyCarrierAnswer(answer,
-                    "Applied by operator decision " + problem.id(), now)) {
+                    "Applied by operator decision " + problem.id(), operatorId, problem.id(), now)) {
                 throw invalidDecision(problem, ProblemDecision.APPLY_CARRIER);
             }
             return;
         }
-        results.applyChosen(problems.recordOf(problem.id()).orElseThrow(), now);
+        results.applyChosen(problems.recordOf(problem.id()).orElseThrow(), operatorId, problem.id(), now);
     }
 
     private static ApiException invalidDecision(ExchangeProblem problem, ProblemDecision decision) {

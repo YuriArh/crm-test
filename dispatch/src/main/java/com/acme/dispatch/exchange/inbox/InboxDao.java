@@ -7,6 +7,12 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.acme.dispatch.config.IdGenerator;
+import com.acme.dispatch.history.Changes;
+import com.acme.dispatch.history.RequestEvent;
+import com.acme.dispatch.history.RequestEventDao;
+import com.acme.dispatch.history.RequestEventKind;
+
 import tools.jackson.databind.json.JsonMapper;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -19,9 +25,13 @@ public class InboxDao {
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     private final JdbcClient jdbc;
+    private final RequestEventDao events;
+    private final IdGenerator ids;
 
-    public InboxDao(JdbcClient jdbc) {
+    public InboxDao(JdbcClient jdbc, RequestEventDao events, IdGenerator ids) {
         this.jdbc = jdbc;
+        this.events = events;
+        this.ids = ids;
     }
 
     /** Counts a repeat of a message known from this source; returns {@code false} if the message is new. */
@@ -191,24 +201,48 @@ public class InboxDao {
                 .optional();
     }
 
-    /** Writes a result to the request: business status and result fields, {@code version + 1}. */
-    public void applyToRequest(UUID requestId, ResultMessage message, Instant now) {
+    /**
+     * Writes a result to the request — business status and result fields, {@code version + 1} — and records the
+     * change as {@code RESULT_CHANGED} with that version (docs/specs/request-history.md §2.1). A result equal to the
+     * request's one changes nothing: no new version, no event.
+     */
+    public void applyToRequest(UUID requestId, ResultMessage message, ResultOrigin origin, Instant now) {
+        String tracking = "SUCCEEDED".equals(message.status()) ? message.trackingNumber() : null;
         BigDecimal price = "SUCCEEDED".equals(message.status()) ? message.price() : null;
+        String reason = "REJECTED".equals(message.status()) ? message.reason() : null;
         jdbc.sql("""
-                        UPDATE delivery_request
+                        WITH old AS (
+                            SELECT id, business_status, tracking_number, price, rejection_reason
+                              FROM delivery_request WHERE id = :requestId FOR UPDATE)
+                        UPDATE delivery_request r
                            SET business_status = :status,
                                tracking_number = :tracking, price = :price, rejection_reason = :reason,
                                result_at = :resultAt,
-                               version = version + 1, updated_at = :now
-                         WHERE id = :requestId""")
+                               version = r.version + 1, updated_at = :now
+                          FROM old
+                         WHERE r.id = old.id
+                           AND (old.business_status, old.tracking_number, old.price, old.rejection_reason)
+                               IS DISTINCT FROM (CAST(:status AS text), CAST(:tracking AS text),
+                                                 CAST(:price AS numeric), CAST(:reason AS text))
+                        RETURNING old.business_status, old.tracking_number, old.price, old.rejection_reason,
+                                  r.version""")
                 .param("status", message.status())
-                .param("tracking", "SUCCEEDED".equals(message.status()) ? message.trackingNumber() : null)
+                .param("tracking", tracking)
                 .param("price", price)
-                .param("reason", "REJECTED".equals(message.status()) ? message.reason() : null)
+                .param("reason", reason)
                 .param("resultAt", message.isFinal() ? toSql(message.occurredAt()) : null)
                 .param("now", toSql(now))
                 .param("requestId", requestId)
-                .update();
+                .query((rs, row) -> new RequestEvent(ids.newId(), requestId, rs.getLong("version"), now,
+                        origin.operatorId(), RequestEventKind.RESULT_CHANGED, new Changes()
+                                .field("businessStatus", rs.getString("business_status"), message.status())
+                                .field("trackingNumber", rs.getString("tracking_number"), tracking)
+                                .price("price", rs.getBigDecimal("price"), price)
+                                .field("rejectionReason", rs.getString("rejection_reason"), reason)
+                                .list(),
+                        origin.inboxId(), origin.problemId()))
+                .optional()
+                .ifPresent(events::insert);
     }
 
     /**
