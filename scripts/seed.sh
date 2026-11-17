@@ -162,6 +162,41 @@ for entry in "${ids[@]}"; do
   [ -n "${entry#*:}" ] && final_card "${entry%%:*}" "${entry#*:}" >/dev/null
 done
 
+# scenario <key> "<modes>" <jq point> <what> <cargo> <weight> <address> <days> [after]: a North request created
+# under these fault modes; once its card reaches the point, every mode goes off, `after <id>` runs (if given),
+# and the request is awaited to its result — before the next scenario, as the modes are global
+# (docs/specs/demo-seed.md §2.2). A request created before this run is only reported: faults apply at the first
+# receipt, so nothing would be reproduced on it.
+scenario() {
+  local key=$1 point=$3 what=$4 after=${9:-} modes id
+  read -ra modes <<<"$2"
+  set_faults "${modes[@]}"
+  id=$(create north.initiator "$key" "$5" "$6" "$7" "$8")
+  [ -z "$id" ] || ids+=("north.initiator:$id")
+  if existed "$key"; then
+    faults_off
+    [ -z "$id" ] || echo "  $key: created before this run, not replayed — $(call north.operator "$API/api/requests/$id" | sed '$d' | jq -r "$STATE")"
+    return
+  fi
+  echo "  $key: ${modes[*]} on, waiting for $what"
+  wait_card north.operator "$id" "$point" 90 "$what" >/dev/null
+  faults_off
+  [ -z "$after" ] || "$after" "$id"
+  echo "  $key: $(wait_card north.operator "$id" "$FINAL" 90 "final result" | jq -r "$STATE")"
+}
+
+echo "Requests through the carrier's fault modes, one at a time:"
+scenario seed-north-5 "unavailable" '.exchange.attempts >= 2' "a second send attempt" \
+  "Холодильное оборудование" 850 "ул. Заводская, 21" 6
+# loseResponse alone gives no UNKNOWN: the result in the feed confirms the delivery before the send times out.
+# With delayed the result comes 15 s later; the UNKNOWN lasts ~5 s until the resend, so its problem counts too.
+scenario seed-north-6 "loseResponse delayed" \
+  '.deliveryStatus == "UNKNOWN" or any(.problems[]?; .kind == "DELIVERY_UNKNOWN")' "an unknown delivery" \
+  "Медицинские расходники" 40 "Больничный пр., 5" 2
+# The carrier remembers duplicate per operation at its first receipt: switching it off then keeps the duplicates.
+scenario seed-north-7 "duplicate" '.deliveryStatus == "ACKNOWLEDGED"' "the carrier's receipt" \
+  "Бумага офисная, 60 коробок" 610 "ул. Печатная, 9" 4
+
 echo "Created requests and their outcomes:"
 for entry in "${ids[@]}"; do
   user=${entry%%:*}; id=${entry#*:}
