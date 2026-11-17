@@ -110,6 +110,7 @@ export function reconciliation(overrides: Partial<Reconciliation> = {}): Reconci
     performedBy: { id: demoOperator.id, displayName: demoOperator.displayName },
     outcome: 'MATCH',
     acknowledged: false,
+    localResult: { status: 'SUCCEEDED', trackingNumber: 'TRK-3F1C2B4D', price: 612.5, reason: null },
     carrierState: 'EXECUTED',
     carrierResult: {
       status: 'SUCCEEDED',

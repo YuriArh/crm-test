@@ -10,6 +10,7 @@ import static org.mockito.Mockito.doThrow;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.UUID;
 
 import com.acme.dispatch.carrier.LookupResult;
 import com.acme.dispatch.carrier.SubmitOutcome;
@@ -20,6 +21,7 @@ import com.acme.dispatch.request.RequestCard;
 import com.acme.dispatch.support.FakeCarrier;
 import com.acme.dispatch.support.IntegrationTest;
 import com.acme.dispatch.support.MutableClock;
+import com.acme.dispatch.support.OurSide;
 import com.acme.dispatch.support.TestRequests;
 import com.acme.dispatch.support.TestResults;
 import com.acme.dispatch.support.TestRows;
@@ -145,6 +147,25 @@ class ReconcileDeliveryTests {
         assertThat(problems(request)).containsExactly("EXTERNAL_MISSING:OPEN:-");
         assertThat(jdbc.sql("SELECT details FROM problem WHERE request_id = :id").param("id", request.id())
                 .query(String.class).single()).contains("OPERATION_NOT_FOUND");
+    }
+
+    @Test
+    void externalMissingRecordsOurResult() {
+        RequestCard request = acknowledged();
+        results.deliver(succeeded(1, request.operationId(), "TRK-00000001", "612.50"));
+
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+
+        assertThat(OurSide.of(jdbc, onlyProblem(request))).isEqualTo("SUCCEEDED/TRK-00000001/612.50/-");
+    }
+
+    @Test
+    void externalMissingWithoutOurResultRecordsThatWeHadNone() {
+        RequestCard request = acknowledged();
+
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+
+        assertThat(OurSide.of(jdbc, onlyProblem(request))).isEqualTo(OurSide.NO_RESULT);
     }
 
     @Test
@@ -296,6 +317,11 @@ class ReconcileDeliveryTests {
                                || coalesce(carrier_state, '-')
                           FROM reconciliation WHERE request_id = :id ORDER BY checked_at, id""")
                 .param("id", request.id()).query(String.class).list();
+    }
+
+    private UUID onlyProblem(RequestCard request) {
+        return jdbc.sql("SELECT id FROM problem WHERE request_id = :id").param("id", request.id())
+                .query(UUID.class).single();
     }
 
     private List<String> problems(RequestCard request) {

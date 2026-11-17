@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import com.acme.dispatch.exchange.ResultSnapshot;
 import com.acme.dispatch.request.BusinessResult;
 import com.acme.dispatch.request.BusinessStatus;
 import com.acme.dispatch.request.PersonRef;
@@ -15,6 +16,7 @@ import com.acme.dispatch.request.PersonRef;
  * @param request       {@code null} for a record that names no known request
  * @param message       the record behind a record problem; {@code null} for delivery problems
  * @param currentResult the request's result now, for a result conflict; otherwise {@code null}
+ * @param ourSide       our result when the problem was opened; {@code null} when no snapshot was kept
  * @param resolvedBy    the operator who closed it; {@code null} while open or when the system closed it
  * @param actions       decisions an operator may take now
  */
@@ -29,6 +31,7 @@ public record ExchangeProblem(
         UUID operationId,
         Message message,
         CurrentResult currentResult,
+        OurSide ourSide,
         PersonRef resolvedBy,
         ProblemDecision decision,
         String comment,
@@ -47,5 +50,9 @@ public record ExchangeProblem(
     }
 
     public record CurrentResult(BusinessStatus businessStatus, BusinessResult result) {
+    }
+
+    /** Our side as it was then; {@code result} is {@code null} when we had no result. */
+    public record OurSide(ResultSnapshot result) {
     }
 }

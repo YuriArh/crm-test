@@ -136,7 +136,9 @@ class ReconciliationSchemaTests {
 
     @Test
     void conflictWithoutCarrierResultIsAccepted() {
-        insertReconciliation(Map.of("outcome", "CONFLICT", "local_result", "SUCCEEDED|TRK-1|10.00|"));
+        Map<String, Object> row = ours("SUCCEEDED", "TRK-1", new BigDecimal("10.00"), null);
+        row.put("outcome", "CONFLICT");
+        insertReconciliation(row);
     }
 
     @Test
@@ -311,6 +313,54 @@ class ReconciliationSchemaTests {
     }
 
     @Test
+    void localSideIsAccepted() {
+        insertReconciliation(ours("SUCCEEDED", "TRK-00000001", new BigDecimal("612.50"), null));
+        insertReconciliation(ours("REJECTED", null, null, "Address is not served"));
+
+        assertThat(jdbc.sql("SELECT count(*) FROM reconciliation WHERE local_status IS NOT NULL")
+                .query(Long.class).single()).isEqualTo(2);
+    }
+
+    @Test
+    void localStatusMustBeKnown() {
+        assertRejected(ours("DONE", null, null, null), "reconciliation_local_status_valid");
+    }
+
+    @Test
+    void localSucceededNeedsTrackingNumber() {
+        assertRejected(ours("SUCCEEDED", null, new BigDecimal("1"), null), "reconciliation_local_result_complete");
+    }
+
+    @Test
+    void localSucceededNeedsPrice() {
+        assertRejected(ours("SUCCEEDED", "TRK-00000001", null, null), "reconciliation_local_result_complete");
+    }
+
+    @Test
+    void localRejectedNeedsReason() {
+        assertRejected(ours("REJECTED", null, null, null), "reconciliation_local_result_complete");
+    }
+
+    @Test
+    void localFieldsNeedStatus() {
+        Map<String, Object> row = ours(null, "TRK-00000001", null, null);
+        row.put("local_result", null);
+        assertRejected(row, "reconciliation_local_result_complete");
+    }
+
+    @Test
+    void localFieldsNeedKey() {
+        Map<String, Object> withoutKey = ours("REJECTED", null, null, "No");
+        withoutKey.put("local_result", null);
+        assertRejected(withoutKey, "reconciliation_local_key_matches");
+    }
+
+    @Test
+    void localKeyNeedsFields() {
+        assertRejected(Map.of("local_result", "REJECTED|||No"), "reconciliation_local_key_matches");
+    }
+
+    @Test
     void reconciliationIndexesExist() {
         assertThat(jdbc.sql("SELECT indexdef FROM pg_indexes WHERE indexname = 'reconciliation_request_idx'")
                 .query(String.class).single()).contains("(request_id, checked_at DESC)");
@@ -335,6 +385,19 @@ class ReconciliationSchemaTests {
         row.put("carrier_message_id", "msg-2");
         row.put("carrier_occurred_at", NOW);
         row.putAll(overrides);
+        return row;
+    }
+
+    /** Our result at the check: the structured fields and the comparison key built from them. */
+    private static Map<String, Object> ours(String status, String tracking, BigDecimal price, String reason) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("local_result", status + "|" + (tracking == null ? "" : tracking) + "|"
+                + (price == null ? "" : price.stripTrailingZeros().toPlainString()) + "|"
+                + (reason == null ? "" : reason));
+        row.put("local_status", status);
+        row.put("local_tracking_number", tracking);
+        row.put("local_price", price);
+        row.put("local_reason", reason);
         return row;
     }
 
@@ -383,9 +446,9 @@ class ReconciliationSchemaTests {
                                String comment) {
         jdbc.sql("""
                         INSERT INTO problem (id, kind, status, request_id, reconciliation_id, details, opened_at,
-                                             resolved_at, resolved_by, decision, comment)
+                                             resolved_at, resolved_by, decision, comment, our_recorded)
                         VALUES (:id, :kind, :status, :request, :reconciliation, 'why', :now, :resolvedAt,
-                                :resolvedBy, :decision, :comment)""")
+                                :resolvedBy, :decision, :comment, false)""")
                 .param("id", UUID.randomUUID())
                 .param("kind", kind)
                 .param("status", status)

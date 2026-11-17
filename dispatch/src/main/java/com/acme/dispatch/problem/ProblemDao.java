@@ -25,11 +25,22 @@ public class ProblemDao {
         this.jdbc = jdbc;
     }
 
-    /** Opens a problem unless the same one is already open (delivery) or exists (record). Returns whether it did. */
+    /**
+     * Opens a problem unless the same one is already open (delivery) or exists (record). Returns whether it did.
+     * A kind with our side ({@link ProblemKind#hasOurSide()}) keeps a snapshot of the request's result, read in the
+     * same statement: the caller's transaction holds the state that caused the problem.
+     */
     public boolean open(UUID id, ProblemKind kind, UUID requestId, UUID inboxId, String details, Instant now) {
         return jdbc.sql("""
-                        INSERT INTO problem (id, kind, status, request_id, inbox_id, details, opened_at)
-                        VALUES (:id, :kind, 'OPEN', :requestId, :inboxId, :details, :now)
+                        INSERT INTO problem (id, kind, status, request_id, inbox_id, details, opened_at, our_recorded,
+                                             our_status, our_tracking_number, our_price, our_reason)
+                        SELECT CAST(:id AS uuid), :kind, 'OPEN', CAST(:requestId AS uuid), CAST(:inboxId AS uuid),
+                               :details, CAST(:now AS timestamptz), CAST(:ourSide AS boolean),
+                               req.business_status, req.tracking_number, req.price, req.rejection_reason
+                          FROM (VALUES (1)) AS one
+                          LEFT JOIN delivery_request req
+                                 ON CAST(:ourSide AS boolean) AND req.id = CAST(:requestId AS uuid)
+                                AND req.business_status IN ('SUCCEEDED', 'REJECTED')
                         ON CONFLICT DO NOTHING""")
                 .param("id", id)
                 .param("kind", kind.name())
@@ -37,15 +48,24 @@ public class ProblemDao {
                 .param("inboxId", inboxId)
                 .param("details", details)
                 .param("now", toSql(now))
+                .param("ourSide", kind.hasOurSide())
                 .update() == 1;
     }
 
-    /** Opens a reconciliation conflict of a request, linked to the check that found it, unless one is open. */
+    /**
+     * Opens a reconciliation conflict of a request, linked to the check that found it, unless one is open. Our side
+     * is the one that check recorded, so both sides are of the same moment.
+     */
     public boolean openReconciliationConflict(UUID id, UUID requestId, UUID reconciliationId, String details,
                                               Instant now) {
         return jdbc.sql("""
-                        INSERT INTO problem (id, kind, status, request_id, reconciliation_id, details, opened_at)
-                        VALUES (:id, 'RECONCILIATION_CONFLICT', 'OPEN', :requestId, :reconciliationId, :details, :now)
+                        INSERT INTO problem (id, kind, status, request_id, reconciliation_id, details, opened_at,
+                                             our_recorded, our_status, our_tracking_number, our_price, our_reason)
+                        SELECT CAST(:id AS uuid), 'RECONCILIATION_CONFLICT', 'OPEN', CAST(:requestId AS uuid), r.id,
+                               :details, CAST(:now AS timestamptz), true,
+                               r.local_status, r.local_tracking_number, r.local_price, r.local_reason
+                          FROM reconciliation r
+                         WHERE r.id = CAST(:reconciliationId AS uuid)
                         ON CONFLICT DO NOTHING""")
                 .param("id", id)
                 .param("requestId", requestId)
@@ -56,13 +76,18 @@ public class ProblemDao {
     }
 
     /**
-     * Points the request's open reconciliation conflict at a newer check, so it shows the carrier's latest answer.
-     * Returns whether one was open.
+     * Points the request's open reconciliation conflict at a newer check, so it shows the carrier's latest answer, and
+     * takes our side from the same check. Returns whether one was open.
      */
     public boolean relinkOpenReconciliationConflict(UUID requestId, UUID reconciliationId, String details) {
         return jdbc.sql("""
-                        UPDATE problem SET reconciliation_id = :reconciliationId, details = :details
-                         WHERE request_id = :requestId AND kind = 'RECONCILIATION_CONFLICT' AND status = 'OPEN'""")
+                        UPDATE problem p
+                           SET reconciliation_id = r.id, details = :details, our_status = r.local_status,
+                               our_tracking_number = r.local_tracking_number, our_price = r.local_price,
+                               our_reason = r.local_reason
+                          FROM reconciliation r
+                         WHERE r.id = :reconciliationId
+                           AND p.request_id = :requestId AND p.kind = 'RECONCILIATION_CONFLICT' AND p.status = 'OPEN'""")
                 .param("reconciliationId", reconciliationId)
                 .param("details", details)
                 .param("requestId", requestId)

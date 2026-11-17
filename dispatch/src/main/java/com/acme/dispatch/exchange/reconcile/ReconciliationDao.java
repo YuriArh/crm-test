@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import com.acme.dispatch.exchange.DeliveryStatus;
+import com.acme.dispatch.exchange.ResultSnapshot;
 import com.acme.dispatch.exchange.inbox.ResultMessage;
 import com.acme.dispatch.exchange.reconcile.ReconciliationRules.Signature;
 
@@ -78,9 +79,8 @@ public class ReconciliationDao {
                 .query((rs, row) -> new State(rs.getObject("operation_id", UUID.class),
                         DeliveryStatus.valueOf(rs.getString("delivery_status")),
                         instant(rs, "reconciled_at"), instant(rs, "next_reconcile_at"),
-                        ReconciliationRules.localContent(rs.getString("business_status"),
-                                rs.getString("tracking_number"), rs.getBigDecimal("price"),
-                                rs.getString("rejection_reason"))))
+                        ResultSnapshot.of(rs.getString("business_status"), rs.getString("tracking_number"),
+                                rs.getBigDecimal("price"), rs.getString("rejection_reason"))))
                 .optional();
     }
 
@@ -101,13 +101,16 @@ public class ReconciliationDao {
     /** Records a check. */
     void insert(Row row) {
         ResultMessage result = row.carrierResult();
+        ResultSnapshot local = row.local();
         jdbc.sql("""
                         INSERT INTO reconciliation (id, request_id, operation_id, checked_at, run_type, performed_by,
-                            outcome, acknowledged, delivery_status, local_result, carrier_state, carrier_result_status,
+                            outcome, acknowledged, delivery_status, local_result, local_status, local_tracking_number,
+                            local_price, local_reason, carrier_state, carrier_result_status,
                             carrier_tracking_number, carrier_price, carrier_reason, carrier_sequence,
                             carrier_message_id, carrier_occurred_at, carrier_response, details, inbox_id)
                         VALUES (:id, :requestId, :operationId, :checkedAt, :runType, :performedBy, :outcome,
-                            :acknowledged, :delivery, :localResult, :carrierState, :resultStatus, :tracking, :price,
+                            :acknowledged, :delivery, :localResult, :localStatus, :localTracking, :localPrice,
+                            :localReason, :carrierState, :resultStatus, :tracking, :price,
                             :reason, :sequence, :messageId, :occurredAt, :response, :details, :inboxId)""")
                 .param("id", row.id())
                 .param("requestId", row.requestId())
@@ -118,7 +121,11 @@ public class ReconciliationDao {
                 .param("outcome", row.outcome().name())
                 .param("acknowledged", row.acknowledged())
                 .param("delivery", row.delivery().name())
-                .param("localResult", row.localResult())
+                .param("localResult", ResultSnapshot.contentOf(local))
+                .param("localStatus", local == null ? null : local.status())
+                .param("localTracking", local == null ? null : local.trackingNumber())
+                .param("localPrice", local == null ? null : local.price())
+                .param("localReason", local == null ? null : local.reason())
                 .param("carrierState", row.carrierState())
                 .param("resultStatus", result == null ? null : result.status())
                 .param("tracking", result == null ? null : result.trackingNumber())
@@ -180,15 +187,24 @@ public class ReconciliationDao {
     /**
      * Our side of a request under the lock.
      *
-     * @param localResult our final result in canonical form, or {@code null}
+     * @param local our final result, or {@code null}
      */
     record State(UUID operationId, DeliveryStatus delivery, Instant reconciledAt, Instant nextReconcileAt,
-                 String localResult) {
+                 ResultSnapshot local) {
+
+        /** Our final result in canonical form, or {@code null}. */
+        String localResult() {
+            return ResultSnapshot.contentOf(local);
+        }
     }
 
-    /** One recorded check. */
+    /**
+     * One recorded check.
+     *
+     * @param local our final result when the check was decided, or {@code null}; its comparison key is stored too
+     */
     record Row(UUID id, UUID requestId, UUID operationId, Instant checkedAt, RunType runType, UUID performedBy,
-               ReconciliationOutcome outcome, boolean acknowledged, DeliveryStatus delivery, String localResult,
+               ReconciliationOutcome outcome, boolean acknowledged, DeliveryStatus delivery, ResultSnapshot local,
                String carrierState, ResultMessage carrierResult, String carrierResponse, String details,
                UUID inboxId) {
     }

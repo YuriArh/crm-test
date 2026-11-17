@@ -57,7 +57,7 @@ describe('deciding on a problem', () => {
     const dialog = await openDecision(user, 'Принять версию перевозчика');
     expect(within(dialog).getByText(/Итог заявки будет заменён версией перевозчика/)).toBeInTheDocument();
     expect(within(dialog).getByRole('region', { name: 'Версия перевозчика' })).toBeInTheDocument();
-    expect(within(dialog).getByRole('region', { name: 'Наш итог' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('region', { name: 'Наш итог при обнаружении' })).toBeInTheDocument();
   });
 
   it('keeping ours in a reconciliation conflict says reconciliation remembers it, and shows both versions', async () => {
@@ -72,7 +72,7 @@ describe('deciding on a problem', () => {
       'Сверка запомнит решение: этот же ответ перевозчика проблему больше не откроет, другой ответ или смена нашего итога — откроет снова',
     );
     expect(within(dialog).getByRole('region', { name: 'Версия перевозчика' })).toBeInTheDocument();
-    expect(within(dialog).getByRole('region', { name: 'Наш итог' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('region', { name: 'Наш итог при обнаружении' })).toBeInTheDocument();
   });
 
   it('keeping ours for a lost operation says the operator sorts it out with the carrier', async () => {

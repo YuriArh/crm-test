@@ -277,6 +277,7 @@ API. Настройки — в `ExchangeProperties`:
 | `acknowledged` | `boolean NOT NULL`: эта проверка подтвердила доставку |
 | `delivery_status` | наш статус доставки на момент решения (для истории и «такого же ответа», §2.1) |
 | `local_result` | наш итог на момент решения в каноническом виде `ResultMessage.content()`; пусто, если итога нет (для истории и правила §2.5 п. 4 «наш итог с тех пор не менялся») |
+| `local_status`, `local_tracking_number`, `local_price`, `local_reason` | наш итог на момент решения, разобранный (V12, `docs/specs/conflict-history.md`); пусто, если итога нет |
 | `carrier_state` | `ACCEPTED` / `EXECUTED` / `NOT_FOUND`; пусто при `ERROR` |
 | `carrier_result_status`, `carrier_tracking_number`, `carrier_price`, `carrier_reason`, `carrier_sequence`, `carrier_message_id`, `carrier_occurred_at` | итог перевозчика, разобранный; пусто, если итога нет |
 | `carrier_response` | дословное тело ответа (`text`, без усечения); пусто, если ответа не было |
@@ -328,7 +329,8 @@ API. Настройки — в `ExchangeProperties`:
   остальных действий.
 - Схема `Reconciliation`: `id`, `checkedAt`, `trigger` (`STARTUP`/`SCHEDULED`/`MANUAL`), `performedBy` (`PersonRef`
   или `null`), `outcome`, `acknowledged`, `carrierState` (или `null`), `carrierResult` (`status`, `trackingNumber`,
-  `price`, `reason`, `sequence`, `messageId`, `occurredAt`; или `null`), `details`.
+  `price`, `reason`, `sequence`, `messageId`, `occurredAt`; или `null`), `details`; `localResult` — наш итог в момент
+  проверки (`ResultSnapshot` или `null`, `docs/specs/conflict-history.md`).
 - `RequestCard` оператора: поле `reconciliations` — последние 20 проверок заявки, новые первыми (D06: результат
   сверки в UI); у инициатора поля нет, как у `problems`. Полная лента событий — пункт 5 плана.
 - `RequestAction`: плюс `RECONCILE` (у оператора всегда); `RETRY` — по §2.7. `ProblemRules.requestActions` получает,
@@ -337,7 +339,8 @@ API. Настройки — в `ExchangeProperties`:
   `message`, что у `RESULT_CONFLICT` (поля из последней строки сверки; `feedSeq` пуст; начало `carrier_response`), а
   `currentResult` — наш итог: интерфейс показывает оба конфликта одним блоком «их версия / наш итог». Если у
   перевозчика итога нет, поля итога в `message` пусты, а `details` это объясняет. Для `EXTERNAL_MISSING` заполнен
-  `currentResult`.
+  `currentResult`. Сравнение в интерфейсе идёт не с `currentResult`, а со снимком `ourSide` на момент проблемы —
+  `docs/specs/conflict-history.md`.
 - `retry` и `resolve` — описания допустимых состояний дополняются по §2.7.
 
 `contracts/carrier-api.yaml`: фраза «a result applied from reconciliation is later recognised as a duplicate in the

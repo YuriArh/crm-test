@@ -7,6 +7,7 @@ import static com.acme.dispatch.support.TestClockConfiguration.START;
 import static com.acme.dispatch.support.TestFeed.succeeded;
 import static com.acme.dispatch.support.TestSecurity.asUser;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -92,7 +93,8 @@ class ReconcileActionTests {
 
         reconcile(request.id().toString(), "k-1")
                 .andExpect(jsonPath("$.outcome").value("EXTERNAL_AHEAD"))
-                .andExpect(jsonPath("$.carrierResult.trackingNumber").value("TRK-00000001"));
+                .andExpect(jsonPath("$.carrierResult.trackingNumber").value("TRK-00000001"))
+                .andExpect(jsonPath("$.localResult").value(nullValue()));
 
         mvc.perform(get("/api/requests/{id}", request.id()).with(asUser(users, NORTH_OPERATOR_LOGIN)))
                 .andExpect(jsonPath("$.businessStatus").value("SUCCEEDED"))

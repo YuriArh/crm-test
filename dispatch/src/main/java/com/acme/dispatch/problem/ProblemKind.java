@@ -15,5 +15,13 @@ public enum ProblemKind {
     /** Reconciliation: the carrier does not know an operation it acknowledged ({@code reconciliation.md} §2.5). */
     EXTERNAL_MISSING,
     /** Reconciliation: our result differs from the carrier's, or only we have one. */
-    RECONCILIATION_CONFLICT
+    RECONCILIATION_CONFLICT;
+
+    /**
+     * Whether the problem compares the carrier's side with ours, so it keeps a snapshot of our result as it was when
+     * it was opened ({@code docs/specs/conflict-history.md}).
+     */
+    public boolean hasOurSide() {
+        return this == RESULT_CONFLICT || this == RECONCILIATION_CONFLICT || this == EXTERNAL_MISSING;
+    }
 }

@@ -8,7 +8,7 @@ import { CopyValue, Property } from '@/shared/ui/parts';
 import { DECISION_ACTIONS, kindView, STATUS_VIEWS } from '../labels';
 import { CarrierMessage } from './CarrierMessage';
 import { ConflictView } from './ConflictView';
-import { OurResult } from './OurResult';
+import { OurResult, ourSideOf, ResultNow, showsResultNow } from './OurResult';
 import { ResolvedLine } from './ResolvedLine';
 
 type Props = {
@@ -22,6 +22,20 @@ type Props = {
   /** Request actions shown next to the decisions (the card puts «Повторить отправку» here). */
   actions?: ReactNode;
 };
+
+/**
+ * Our result for a lost operation (`EXTERNAL_MISSING`), as it was when the carrier did not know it: it tells whether a
+ * retry was needed. A result that came since is shown apart.
+ */
+function LostOperationResult({ problem }: { problem: ExchangeProblem }) {
+  const ours = ourSideOf(problem);
+  return (
+    <Stack gap="md">
+      <OurResult title={ours.title} result={ours.result} note={ours.note} />
+      {showsResultNow(problem) && <ResultNow problem={problem} />}
+    </Stack>
+  );
+}
 
 const CONFLICTS = new Set<string>(['RESULT_CONFLICT', 'RECONCILIATION_CONFLICT']);
 const RECORDS = new Set<string>(['INVALID_MESSAGE', 'MESSAGE_FAILED']);
@@ -79,9 +93,9 @@ export function ProblemDetails({ problem, showRequest = true, showKind = true, o
         )}
       </Group>
 
-      {CONFLICTS.has(problem.kind) && <ConflictView message={problem.message} current={problem.currentResult} />}
+      {CONFLICTS.has(problem.kind) && <ConflictView problem={problem} />}
       {RECORDS.has(problem.kind) && problem.message && <CarrierMessage message={problem.message} />}
-      {problem.kind === 'EXTERNAL_MISSING' && <OurResult current={problem.currentResult} />}
+      {problem.kind === 'EXTERNAL_MISSING' && <LostOperationResult problem={problem} />}
 
       {problem.status === 'RESOLVED' && (
         <Stack gap="xs">

@@ -93,6 +93,13 @@ class ReconcileAheadTests {
                          WHERE r.request_id = :id""")
                 .param("id", request.id()).query(String.class).single()).isEqualTo("EXTERNAL_AHEAD:true:true");
         assertThat(problems(request)).containsExactly("DELIVERY_FAILED:RESOLVED:SYSTEM");
+        assertThat(jdbc.sql("""
+                        SELECT coalesce(local_result, '-') || coalesce(local_status, '-')
+                               || coalesce(local_tracking_number, '-') || coalesce(local_price::text, '-')
+                               || coalesce(local_reason, '-')
+                          FROM reconciliation WHERE request_id = :id""")
+                .param("id", request.id()).query(String.class).single())
+                .as("we had no result before the check").isEqualTo("-----");
     }
 
     @Test
