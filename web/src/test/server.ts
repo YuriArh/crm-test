@@ -5,6 +5,12 @@ import type { Me, Problem } from '@/shared/api';
 /** The fake dispatch of component tests. Each test adds the handlers it needs with `server.use(...)`. */
 export const server = setupServer(
   http.get('*/api/auth/csrf', () => HttpResponse.json({ headerName: 'X-XSRF-TOKEN', token: 'test-token' })),
+  // The header's counter of open problems, on every operator screen: none unless a test says otherwise.
+  http.get('*/api/problems', ({ request }) =>
+    new URL(request.url).searchParams.get('size') === '1'
+      ? HttpResponse.json({ items: [], page: 0, size: 1, totalElements: 0, totalPages: 0 })
+      : undefined,
+  ),
 );
 
 export const demoInitiator: Me = {

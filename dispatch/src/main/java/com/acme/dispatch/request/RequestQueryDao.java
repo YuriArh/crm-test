@@ -45,6 +45,15 @@ public class RequestQueryDao {
     private static final String OVERDUE_CONDITION =
             "(r.business_status IN ('AWAITING', 'IN_PROGRESS') AND r.deadline < :today)";
 
+    /** Both use {@code problem_request_idx (request_id)}. */
+    private static final String HAS_OPEN_PROBLEMS =
+            "EXISTS (SELECT 1 FROM problem p WHERE p.request_id = r.id AND p.status = 'OPEN')";
+
+    /** Operators see how many problems of the row are open; initiators never learn about problems (NF02). */
+    private static final String OPEN_PROBLEMS_COLUMN =
+            ", (SELECT count(*) FROM problem p WHERE p.request_id = r.id AND p.status = 'OPEN') AS open_problems\n";
+    private static final String NO_OPEN_PROBLEMS_COLUMN = ", NULL::bigint AS open_problems\n";
+
     private final JdbcClient jdbc;
 
     public RequestQueryDao(JdbcClient jdbc) {
@@ -56,7 +65,9 @@ public class RequestQueryDao {
         Map<String, Object> params = new HashMap<>();
         String where = where(viewer, query, today, params);
         String direction = query.ascending() ? "ASC" : "DESC";
-        String sql = LIST_COLUMNS + FROM + where
+        String columns = LIST_COLUMNS.stripTrailing()
+                + (viewer.isOperator() ? OPEN_PROBLEMS_COLUMN : NO_OPEN_PROBLEMS_COLUMN);
+        String sql = columns + FROM + where
                 + " ORDER BY " + query.sortField().column() + " " + direction + ", r.id " + direction
                 + " LIMIT :limit OFFSET :offset";
         params.put("limit", query.size());
@@ -119,6 +130,9 @@ public class RequestQueryDao {
             where.append(query.overdue() ? " AND " : " AND NOT ").append(OVERDUE_CONDITION);
             params.put("today", today);
         }
+        if (query.hasOpenProblems() != null) {
+            where.append(query.hasOpenProblems() ? " AND " : " AND NOT ").append(HAS_OPEN_PROBLEMS);
+        }
         return where.toString();
     }
 
@@ -135,7 +149,8 @@ public class RequestQueryDao {
                 OverduePolicy.isOverdue(status, deadline, today),
                 owner(rs),
                 assignee(rs),
-                instant(rs, "created_at"));
+                instant(rs, "created_at"),
+                rs.getObject("open_problems", Long.class) == null ? null : rs.getInt("open_problems"));
     }
 
     private static CardRow mapCard(ResultSet rs, LocalDate today) throws SQLException {

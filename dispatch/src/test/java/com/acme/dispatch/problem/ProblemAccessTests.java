@@ -101,6 +101,48 @@ class ProblemAccessTests {
     }
 
     @Test
+    void initiatorCannotReadOneProblem() throws Exception {
+        UUID problem = open(requests.create("1"));
+
+        mvc.perform(get("/api/problems/{id}", problem).with(asUser(users, NORTH_INITIATOR_LOGIN)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void oneProblemOfAnotherServiceIsNotFound() throws Exception {
+        UUID north = open(requests.create("1"));
+
+        mvc.perform(get("/api/problems/{id}", north).with(asUser(users, SOUTH_OPERATOR_LOGIN)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+        mvc.perform(get("/api/problems/{id}", north).with(asUser(users, NORTH_OPERATOR_LOGIN)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(north.toString()));
+    }
+
+    @Test
+    void oneProblemWithoutRequestIsSeenByAnyOperator() throws Exception {
+        results.deliver(succeeded(1, UUID.randomUUID(), "TRK-00000001", "325.00"));
+        UUID orphan = jdbc.sql("SELECT id FROM problem WHERE request_id IS NULL").query(UUID.class).single();
+
+        for (String login : new String[] {NORTH_OPERATOR_LOGIN, SOUTH_OPERATOR_LOGIN}) {
+            mvc.perform(get("/api/problems/{id}", orphan).with(asUser(users, login)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.request").value(org.hamcrest.Matchers.nullValue()));
+        }
+    }
+
+    @Test
+    void missingOrMalformedProblemIdIsNotFound() throws Exception {
+        for (String id : new String[] {UUID.randomUUID().toString(), "not-a-uuid"}) {
+            mvc.perform(get("/api/problems/{id}", id).with(asUser(users, NORTH_OPERATOR_LOGIN)))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+        }
+    }
+
+    @Test
     void initiatorCardHasNoProblems() throws Exception {
         RequestCard request = requests.create("1");
         open(request);

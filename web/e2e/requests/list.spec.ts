@@ -57,7 +57,8 @@ test('the list pages through the address', async ({ page }) => {
   await page.goto('/requests');
   await expect(page.getByText(/^1–\d+ из \d+$/)).toBeVisible();
 
-  const second = page.getByRole('button', { name: 'Страница 2' });
+  // Exact: with 20+ pages «Страница 2» would also match «Страница 20».
+  const second = page.getByRole('button', { name: 'Страница 2', exact: true });
   test.skip((await second.count()) === 0, 'fewer than 21 requests in the service');
   await second.click();
 

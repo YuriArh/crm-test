@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import type { RequestCard } from '@/shared/api';
 import { useBusinessTimezone } from '@/shared/system';
 import { formatInstant } from '../format';
-import { Property, Section } from './parts';
+import { Property, Section } from '@/shared/ui/parts';
 
 export const NO_ASSIGNEE = 'Не назначен';
 

@@ -1,0 +1,70 @@
+/* What the problems list cannot express with Mantine props: the row link and truncation (as in the registry). */
+
+.table {
+  --table-border-color: var(--app-color-border);
+}
+
+.table thead th {
+  color: var(--app-color-text-tertiary);
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 510;
+  white-space: nowrap;
+  background-color: var(--mantine-color-body);
+}
+
+/* The whole row opens the problem: the kind's link stretches over the row; the request's link stays above it. */
+.row {
+  position: relative;
+}
+
+.rowLink {
+  color: var(--mantine-color-text);
+  font-weight: 510;
+  text-decoration: none;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+
+  &:focus-visible {
+    outline: none;
+  }
+}
+
+.row:has(.rowLink:focus-visible) {
+  outline: 2px solid var(--app-color-focus-ring);
+  outline-offset: -2px;
+}
+
+.row:hover {
+  background-color: var(--mantine-color-default-hover);
+}
+
+.above {
+  position: relative;
+  z-index: 1;
+}
+
+.details {
+  max-width: 0;
+  width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card {
+  display: block;
+  padding: var(--mantine-spacing-md);
+  border: 1px solid var(--app-color-border);
+  border-radius: var(--mantine-radius-md);
+  background-color: var(--app-color-surface);
+  color: inherit;
+  text-decoration: none;
+
+  &:focus-visible {
+    outline: 2px solid var(--app-color-focus-ring);
+  }
+}

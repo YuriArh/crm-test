@@ -16,6 +16,8 @@ export function AuthenticatedLayout() {
   const me = useCurrentUser();
   const router = useRouter();
   const logout = useLogout();
+  // The app's sections (RouterContext.headerNav); this module does not know what they are.
+  const Nav = router.options.context.headerNav;
 
   // useLogout has cleared the cache by the time this runs, so /login does not bounce back, and Back
   // from /login meets the guard again instead of the old page.
@@ -25,11 +27,14 @@ export function AuthenticatedLayout() {
     <AppShell header={{ height: 48 }} padding="lg">
       <AppShell.Header>
         <Group h="100%" px="lg" justify="space-between" wrap="nowrap">
-          <Group gap="sm" wrap="nowrap">
-            <BrandMark size={22} />
-            <Text fw={590} size="md">
-              Dispatch
-            </Text>
+          <Group gap="md" wrap="nowrap">
+            <Group gap="sm" wrap="nowrap">
+              <BrandMark size={22} />
+              <Text fw={590} size="md" visibleFrom="xs">
+                Dispatch
+              </Text>
+            </Group>
+            {Nav && <Nav />}
           </Group>
           <Group gap="sm" wrap="nowrap">
             {/* Below 36em (phones) the header keeps only the mark, the scheme switch and "Выйти". */}

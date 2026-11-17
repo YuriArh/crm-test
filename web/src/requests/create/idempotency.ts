@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useMemo } from 'react';
+import { createActionKeys, useActionKeys } from '@/shared/actions/idempotency';
 import type { CreateRequest } from '@/shared/api';
 
 /**
@@ -19,26 +20,16 @@ function fingerprint(body: CreateRequest): string {
   return JSON.stringify([body.cargoDescription, body.weightKg, body.deliveryAddress, body.deadline]);
 }
 
-export function createIdempotencyKeys(newKey: () => string = () => crypto.randomUUID()): IdempotencyKeys {
-  const keys = new Map<string, string>();
-  return {
-    keyFor(body) {
-      const id = fingerprint(body);
-      let key = keys.get(id);
-      if (key === undefined) {
-        key = newKey();
-        keys.set(id, key);
-      }
-      return key;
-    },
-    renew(body) {
-      keys.delete(fingerprint(body));
-    },
-  };
+function asFormKeys(keys: ReturnType<typeof createActionKeys<CreateRequest>>): IdempotencyKeys {
+  return { keyFor: keys.keyFor, renew: keys.forget };
+}
+
+export function createIdempotencyKeys(newKey?: () => string): IdempotencyKeys {
+  return asFormKeys(createActionKeys(fingerprint, newKey));
 }
 
 /** The keys of the form being shown; they go away with it. */
 export function useIdempotencyKeys(): IdempotencyKeys {
-  const [keys] = useState(() => createIdempotencyKeys());
-  return keys;
+  const keys = useActionKeys(fingerprint);
+  return useMemo(() => asFormKeys(keys), [keys]);
 }

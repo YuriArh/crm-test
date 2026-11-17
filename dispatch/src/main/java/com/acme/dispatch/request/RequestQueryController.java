@@ -27,11 +27,13 @@ class RequestQueryController {
     PageResponse<RequestListItem> list(@RequestParam(required = false) String businessStatus,
                                        @RequestParam(required = false) String deliveryStatus,
                                        @RequestParam(required = false) String overdue,
+                                       @RequestParam(required = false) String hasOpenProblems,
                                        @RequestParam(required = false) String page,
                                        @RequestParam(required = false) String size,
                                        @RequestParam(required = false) String sort,
                                        @AuthenticationPrincipal CurrentUser user) {
-        RequestListQuery query = RequestListQuery.parse(businessStatus, deliveryStatus, overdue, page, size, sort);
+        RequestListQuery query = RequestListQuery.parse(businessStatus, deliveryStatus, overdue, hasOpenProblems,
+                page, size, sort);
         return service.list(query, user);
     }
 

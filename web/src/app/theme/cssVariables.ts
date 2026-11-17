@@ -37,6 +37,8 @@ function schemeVariables(scheme: Scheme): Record<string, string> {
 export const cssVariablesResolver: CSSVariablesResolver = () => ({
   variables: {
     '--app-header-height': '3rem',
+    // The raw text of a carrier record scrolls past this height.
+    '--app-excerpt-max-height': '12rem',
   },
   dark: schemeVariables(schemes.dark),
   light: schemeVariables(schemes.light),

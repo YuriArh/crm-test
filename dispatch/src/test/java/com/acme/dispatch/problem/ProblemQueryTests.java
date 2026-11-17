@@ -37,6 +37,9 @@ import com.acme.dispatch.support.TestRequests;
 import com.acme.dispatch.support.TestResults;
 import com.acme.dispatch.support.TestRows;
 
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -399,6 +402,46 @@ class ProblemQueryTests {
         results.deliver(succeeded(1, request.operationId(), "TRK-00000001", "325.00"));
         return request;
     }
+
+    /** {@code GET /api/problems/{id}} answers exactly the item of the list, for every kind (web-problems.md §3.1). */
+    @Test
+    void oneProblemIsTheSameAsItsListItem() throws Exception {
+        RequestCard failed = requests.create("1");
+        carrier.answer(new SubmitResult(SubmitOutcome.PERMANENT_ERROR, 400, "HTTP 400"));
+        worker.runOnce();
+        RequestCard unknown = requests.create("2");
+        carrier.answer(new SubmitResult(SubmitOutcome.UNKNOWN, null, "No response in time"));
+        worker.runOnce();
+        RequestCard invalid = requests.create("3");
+        results.deliver(entry(7, UUID.randomUUID().toString(), invalid.operationId(), 2, "SUCCEEDED", "TRK-00000001",
+                "-1.00", null));
+        results.deliver(succeeded(8, UUID.randomUUID(), "TRK-00000002", "325.00"));
+        RequestCard conflict = requests.create("4");
+        results.deliver(succeeded(9, conflict.operationId(), "TRK-00000003", "325.00"));
+        results.deliver(succeeded(10, conflict.operationId(), "TRK-00000004", "400.00"));
+        UUID resolved = open(ProblemKind.DELIVERY_UNKNOWN, failed, START.plusSeconds(50));
+        resolveBySystem(resolved);
+
+        String page = mvc.perform(get("/api/problems").param("status", "ALL").param("size", "100")
+                        .with(asUser(users, NORTH_OPERATOR_LOGIN)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        JsonNode items = JSON.readTree(page).get("items");
+        java.util.List<String> kinds = new java.util.ArrayList<>();
+        items.forEach(item -> kinds.add(item.get("kind").asString()));
+        org.assertj.core.api.Assertions.assertThat(kinds).containsExactlyInAnyOrder("DELIVERY_FAILED",
+                "DELIVERY_UNKNOWN", "INVALID_MESSAGE", "INVALID_MESSAGE", "RESULT_CONFLICT", "DELIVERY_UNKNOWN");
+
+        for (JsonNode item : items) {
+            String one = mvc.perform(get("/api/problems/{id}", item.get("id").asString())
+                            .with(asUser(users, NORTH_OPERATOR_LOGIN)))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+            org.assertj.core.api.Assertions.assertThat(JSON.readTree(one)).isEqualTo(item);
+        }
+    }
+
+    private static final JsonMapper JSON = JsonMapper.builder().build();
 
     private UUID open(ProblemKind kind, RequestCard request, java.time.Instant at) {
         UUID id = ids.newId();

@@ -2,7 +2,7 @@ import { Group, Stack, Text } from '@mantine/core';
 import { IconLock } from '@tabler/icons-react';
 import type { RequestCard } from '@/shared/api';
 import { formatDate, formatWeight } from '../format';
-import { Section } from './parts';
+import { Section } from '@/shared/ui/parts';
 
 export const IMMUTABLE_HINT = 'Содержимое заявки не меняется после создания';
 

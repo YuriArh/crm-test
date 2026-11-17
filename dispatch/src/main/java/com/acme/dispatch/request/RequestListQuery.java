@@ -17,11 +17,13 @@ import com.acme.dispatch.exchange.DeliveryStatus;
  * @param businessStatus filter, or {@code null}
  * @param deliveryStatus filter, or {@code null}
  * @param overdue        filter, or {@code null}
+ * @param hasOpenProblems filter (operators only), or {@code null}
  */
 public record RequestListQuery(
         BusinessStatus businessStatus,
         DeliveryStatus deliveryStatus,
         Boolean overdue,
+        Boolean hasOpenProblems,
         int page,
         int size,
         SortField sortField,
@@ -61,11 +63,18 @@ public record RequestListQuery(
         return parse(null, null, null, null, null, null);
     }
 
+    /** Without the problem filter. */
     public static RequestListQuery parse(String businessStatus, String deliveryStatus, String overdue,
                                          String page, String size, String sort) {
+        return parse(businessStatus, deliveryStatus, overdue, null, page, size, sort);
+    }
+
+    public static RequestListQuery parse(String businessStatus, String deliveryStatus, String overdue,
+                                         String hasOpenProblems, String page, String size, String sort) {
         BusinessStatus business = parseEnum(BusinessStatus.class, "businessStatus", businessStatus);
         DeliveryStatus delivery = parseEnum(DeliveryStatus.class, "deliveryStatus", deliveryStatus);
         Boolean overdueFilter = parseBoolean("overdue", overdue);
+        Boolean problemsFilter = parseBoolean("hasOpenProblems", hasOpenProblems);
 
         int pageNumber = parseInt("page", page, 0);
         if (pageNumber < 0) {
@@ -96,7 +105,8 @@ public record RequestListQuery(
             };
         }
 
-        return new RequestListQuery(business, delivery, overdueFilter, pageNumber, pageSize, field, ascending);
+        return new RequestListQuery(business, delivery, overdueFilter, problemsFilter, pageNumber, pageSize, field,
+                ascending);
     }
 
     public long offset() {
