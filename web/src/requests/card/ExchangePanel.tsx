@@ -1,4 +1,5 @@
 import { Stack, Text } from '@mantine/core';
+import type { ReactNode } from 'react';
 import type { ExchangeInfo, RequestCard } from '@/shared/api';
 import { useBusinessTimezone } from '@/shared/system';
 import { formatInstant } from '../format';
@@ -11,7 +12,16 @@ const ACKNOWLEDGED_VIA: Record<NonNullable<ExchangeInfo['acknowledgedVia']>, str
 };
 
 /** The technical state of the exchange with the carrier. Only operators get `exchange` from the server. */
-export function ExchangePanel({ card, exchange }: { card: RequestCard; exchange: ExchangeInfo }) {
+export function ExchangePanel({
+  card,
+  exchange,
+  actions,
+}: {
+  card: RequestCard;
+  exchange: ExchangeInfo;
+  /** The operator's actions on the delivery («Повторить отправку»), under the properties. */
+  actions?: ReactNode;
+}) {
   const timeZone = useBusinessTimezone();
 
   return (
@@ -48,6 +58,7 @@ export function ExchangePanel({ card, exchange }: { card: RequestCard; exchange:
         <Property label="Идентификатор операции">
           <CopyValue value={card.operationId} label="идентификатор операции" mono />
         </Property>
+        {actions}
       </Stack>
     </Section>
   );

@@ -13,6 +13,10 @@ import { LeaveGuard } from './LeaveGuard';
 import { PropertiesPanel } from './PropertiesPanel';
 import { RequestNotFound } from './RequestNotFound';
 import { ResultSection } from './ResultSection';
+import { RetryAction } from './RetryAction';
+
+/** Problems of the delivery itself: their notice offers «Повторить отправку» when the card allows it. */
+const DELIVERY_KINDS = new Set<string>(['DELIVERY_UNKNOWN', 'DELIVERY_FAILED']);
 import { useCardEditor } from './useCardEditor';
 
 /**
@@ -32,7 +36,12 @@ export function RequestCardPage({ id }: { id: string }) {
   if (isCardGone(error)) return <RequestNotFound />;
 
   const header = <CardHeader card={card} />;
-  const problems = card.problems?.length ? <ProblemsBlock problems={card.problems} /> : null;
+  const problems = card.problems?.length ? (
+    <ProblemsBlock
+      problems={card.problems}
+      actionsFor={(problem) => (DELIVERY_KINDS.has(problem.kind) ? <RetryAction card={card} /> : null)}
+    />
+  ) : null;
   const content = <ContentSection card={card} />;
   const result = <ResultSection card={card} />;
   const comment = <CommentField card={card} editor={editor} />;
@@ -42,7 +51,9 @@ export function RequestCardPage({ id }: { id: string }) {
       assignee={me.role === 'OPERATOR' ? <AssigneeField card={card} editor={editor} /> : undefined}
     />
   );
-  const exchange = card.exchange ? <ExchangePanel card={card} exchange={card.exchange} /> : null;
+  const exchange = card.exchange ? (
+    <ExchangePanel card={card} exchange={card.exchange} actions={<RetryAction card={card} />} />
+  ) : null;
 
   return (
     <Container size="lg" px={0}>

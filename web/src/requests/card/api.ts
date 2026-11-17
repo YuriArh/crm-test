@@ -1,4 +1,5 @@
 import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query';
+import { problemKeys } from '@/problems';
 import { api, isApiError, unwrap, type RequestCard, type UpdateRequest } from '@/shared/api';
 import { requestKeys } from '../keys';
 import { isFinalBusiness, isFinalDelivery } from '../statuses';
@@ -48,6 +49,29 @@ export const operatorsQueryOptions = queryOptions({
 /** The request is gone from the caller's scope: someone else's, or no longer visible (NF02). */
 export function isCardGone(error: unknown): boolean {
   return isApiError(error) && error.status === 404;
+}
+
+/**
+ * `POST /api/requests/{id}/retry` (operators): a new budget of retries with the same `operationId`. The answer —
+ * the card — replaces the one in the cache; the registry and the problems are stale. A replay of an earlier retry
+ * with the same key (`Idempotent-Replayed`) is a success too.
+ */
+export function useRetryDelivery(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (idempotencyKey: string) =>
+      unwrap(
+        api.POST('/api/requests/{id}/retry', {
+          params: { path: { id }, header: { 'Idempotency-Key': idempotencyKey } },
+        }),
+      ),
+    onMutate: () => queryClient.cancelQueries({ queryKey: requestKeys.card(id) }),
+    onSuccess: (card) => {
+      queryClient.setQueryData(requestKeys.card(id), card);
+      void queryClient.invalidateQueries({ queryKey: requestKeys.lists });
+      void queryClient.invalidateQueries({ queryKey: problemKeys.all });
+    },
+  });
 }
 
 /**
