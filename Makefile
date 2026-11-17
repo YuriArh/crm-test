@@ -74,7 +74,7 @@ db-start: ## Start PostgreSQL after db-kill and wait until dispatch and carrier-
 	@$(MAKE) --no-print-directory wait
 
 seed: wait ## Create demo requests through the API (safe to re-run; start the stack with make up)
-	./scripts/seed.sh $(E2E_BASE_URL)
+	CARRIER_BASE_URL=$(CARRIER_BASE_URL) ./scripts/seed.sh $(E2E_BASE_URL)
 
 inbox: ## Show the newest 30 carrier results received by dispatch: status, reason, processing attempts
 	@docker compose exec -T postgres psql -U $(or $(DB_USER),dispatch) -d $(or $(DB_NAME),dispatch) -c \

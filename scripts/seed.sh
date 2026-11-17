@@ -5,15 +5,53 @@
 # Safe to re-run: each request has a fixed Idempotency-Key, so a repeat creates nothing new
 # (the same day: the stored response is replayed; another day: the key is reported as used).
 #
+# Some requests go through the carrier emulator's fault modes (docs/specs/demo-seed.md). The modes are global, so
+# the seed switches them all off when it starts and whenever it exits — on an error and on Ctrl+C too.
+#
 # Usage: scripts/seed.sh [dispatch base URL]   (default http://localhost:8080; needs curl and jq)
+#        CARRIER_BASE_URL — the emulator (default http://localhost:8081)
 set -euo pipefail
 
 API="${1:-${E2E_BASE_URL:-http://localhost:8080}}"
+CARRIER="${CARRIER_BASE_URL:-http://localhost:8081}"
 PASSWORD=demo1234
 WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT
 
 command -v jq >/dev/null || { echo "seed: jq is required" >&2; exit 1; }
+
+FAULTS_OFF='{"unavailable":false,"loseResponse":false,"duplicate":false,"delayed":false,"malformed":false}'
+
+# put_faults <json>: the emulator's switches as a whole object (all five modes).
+put_faults() {
+  curl -sf -X PUT -H 'Content-Type: application/json' -d "$1" "$CARRIER/admin/faults" >/dev/null \
+    || { echo "seed: cannot set the fault modes at $CARRIER" >&2; return 1; }
+}
+
+# set_faults <mode...>: switches on exactly these modes and every other one off.
+set_faults() {
+  local body=$FAULTS_OFF mode
+  for mode in "$@"; do body=$(jq -c --arg m "$mode" '.[$m] = true' <<<"$body"); done
+  put_faults "$body"
+}
+
+faults_off() { put_faults "$FAULTS_OFF"; }
+
+# On every exit: no fault mode is left on, whatever happened. A failure here is reported, the exit code is kept.
+cleanup() {
+  local status=$?
+  faults_off || echo "seed: fault modes may still be on — run make fault-off" >&2
+  rm -rf "$WORK"
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Starts from a known state: a tester may have left a mode on.
+on=$(curl -sf "$CARRIER/admin/faults" | jq -r 'to_entries | map(select(.value)) | map(.key) | join(", ")') \
+  || { echo "seed: carrier emulator is not reachable at $CARRIER" >&2; exit 1; }
+[ -z "$on" ] || echo "Fault modes were on: $on — switching them off"
+faults_off
 
 # Deadline N days from today in the business time zone.
 deadline() {
