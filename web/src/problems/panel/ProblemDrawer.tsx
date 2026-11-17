@@ -37,7 +37,7 @@ export function ProblemDrawer() {
       title={problem ? kindView(problem.kind).label : 'Проблема'}
       closeButtonProps={{ 'aria-label': 'Закрыть' }}
     >
-      {problem && <ProblemDetails problem={problem} onDecide={(decision) => decisions.open(problem, decision)} />}
+      {problem && <ProblemDetails problem={problem} showKind={false} onDecide={(decision) => decisions.open(problem, decision)} />}
       {!problem && unavailable && (
         <Stack gap="md">
           <Text>Проблема не найдена или недоступна</Text>

@@ -30,6 +30,14 @@ describe('ProblemDetails', () => {
     expect(screen.getByRole('button', { name: 'Скопировать идентификатор операции' })).toBeInTheDocument();
   });
 
+  it('leaves out the kind’s name where a title already says it (the panel), keeping the status and the hint', async () => {
+    renderInRouter(<ProblemDetails problem={deliveryUnknown()} showKind={false} />);
+
+    expect(await screen.findByText('Открыта')).toBeInTheDocument();
+    expect(screen.getByText(/Ответ перевозчика потерян/)).toBeInTheDocument();
+    expect(screen.queryByText('Неизвестно, получена ли заявка')).not.toBeInTheDocument();
+  });
+
   it('leaves out the request when asked (the card is the request already)', async () => {
     renderInRouter(<ProblemDetails problem={deliveryFailed()} showRequest={false} />);
 

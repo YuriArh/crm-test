@@ -14,7 +14,8 @@ function decisionText(problem: ExchangeProblem): string {
 function StatusDot({ problem }: { problem: ExchangeProblem }) {
   const status = STATUS_VIEWS[problem.status];
   return (
-    <Badge variant="dot" color={status.color} size="sm" radius="sm" tt="none" fw={510}>
+    // Never squeezed by a long kind name next to it (phone cards).
+    <Badge variant="dot" color={status.color} size="sm" radius="sm" tt="none" fw={510} style={{ flexShrink: 0 }}>
       {status.label}
     </Badge>
   );

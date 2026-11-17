@@ -14,6 +14,8 @@ type Props = {
   problem: ExchangeProblem;
   /** The request's link; the card leaves it out (it is the request). */
   showRequest?: boolean;
+  /** The kind's name; the panel leaves it out (its title says it). */
+  showKind?: boolean;
   /** Called with a decision of `problem.actions`; without it no decision buttons are shown. */
   onDecide?: (decision: ProblemDecision) => void;
   /** Request actions shown next to the decisions (the card puts «Повторить отправку» here). */
@@ -28,7 +30,7 @@ const RECORDS = new Set<string>(['INVALID_MESSAGE', 'MESSAGE_FAILED']);
  * what happened and why, the carrier record or both sides of a conflict, how it was closed, and the decisions
  * dispatch allows now — the client never works out which decisions are possible.
  */
-export function ProblemDetails({ problem, showRequest = true, onDecide, actions }: Props) {
+export function ProblemDetails({ problem, showRequest = true, showKind = true, onDecide, actions }: Props) {
   const timeZone = useBusinessTimezone();
   const kind = kindView(problem.kind);
   const { request } = problem;
@@ -39,7 +41,7 @@ export function ProblemDetails({ problem, showRequest = true, onDecide, actions 
     <Stack gap="md">
       <Stack gap={4}>
         <Group gap="xs" wrap="wrap">
-          <Text fw={590}>{kind.label}</Text>
+          {showKind && <Text fw={590}>{kind.label}</Text>}
           <Badge variant="dot" color={status.color} size="sm" radius="sm" tt="none" fw={510}>
             {status.label}
           </Badge>
