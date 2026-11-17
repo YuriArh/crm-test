@@ -20,6 +20,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
@@ -81,13 +83,29 @@ public class InboxProcessor {
         }
     }
 
+    /**
+     * Processes one record now, in the caller's transaction: reconciliation takes a result over this way, so the
+     * check and its result commit together ({@code docs/specs/reconciliation.md} §2.3). Returns {@code false} if the
+     * record no longer waits for processing or another processor holds it.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean process(UUID inboxId) {
+        Optional<Pending> claimed = inbox.claimById(inboxId);
+        claimed.ifPresent(record -> handle(record, calendar.now()));
+        return claimed.isPresent();
+    }
+
     private boolean processNext() {
         Instant now = calendar.now();
         Optional<Pending> claimed = inbox.claimNextDue(now);
         if (claimed.isEmpty()) {
             return false;
         }
-        Pending record = claimed.get();
+        handle(claimed.get(), now);
+        return true;
+    }
+
+    private void handle(Pending record, Instant now) {
         ResultMessage message = null;
         Optional<Outcome> outcome;
         try {
@@ -100,7 +118,6 @@ public class InboxProcessor {
             outcome = retryOrFail(record, message, e, now);
         }
         outcome.ifPresent(decided -> finish(record, decided, now));
-        return true;
     }
 
     /**
@@ -148,6 +165,9 @@ public class InboxProcessor {
         if (outcome.acknowledged()) {
             problems.onDeliveryStatus(outcome.requestId(), outcome.message().operationId(),
                     DeliveryStatus.ACKNOWLEDGED, null, null, now);
+        }
+        if (outcome.decision() == Decision.APPLIED) {
+            problems.onCarrierKnowsOperation(outcome.requestId(), outcome.message().operationId(), now);
         }
     }
 

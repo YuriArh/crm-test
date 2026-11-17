@@ -370,7 +370,8 @@ feed» заменяется: повтор между источниками — 
 |---|---|
 | `UNKNOWN`, перевозчик `ACCEPTED` | `ACKNOWLEDGED` via `RECONCILIATION`, `DELIVERY_UNKNOWN` закрыта системой, строка `MATCH` с `acknowledged = true`, повтора отправки нет |
 | `FAILED`, перевозчик `EXECUTED` с итогом | подтверждение + `EXTERNAL_AHEAD`: итог применён в той же транзакции, `DELIVERY_FAILED` закрыта, запись `inbox` с `source = RECONCILIATION` в `APPLIED` |
-| запись ленты `INVALID`, затем сверка | итог применён; позже лента приносит исправную запись с тем же `messageId` — `STALE`, итог и `version` не меняются |
+| запись ленты `INVALID`, затем сверка | итог применён; повтор той же записи лентой — `DUPLICATE` (тот же источник), итог и `version` не меняются |
+| сверка раньше ленты (`delayed`) | лента приносит запись впервые после сверки — `STALE`, проблем нет |
 | `UNKNOWN`, `404` | `EXTERNAL_MISSING`, `next_attempt_at = now`, бюджет прежний; следующий проход воркера отправляет |
 | `FAILED`, `404` | `EXTERNAL_MISSING`, состояние не меняется, проблемы не открываются |
 | `ACKNOWLEDGED` без итога, `404` | проблема `EXTERNAL_MISSING`, в карточке `RETRY`; «Повторить» → `PENDING`, `retry_from = attempts`, `attempts` прежний, сроки сверки очищены, проблема `RETRIED`; повтор той же сверки до «Повторить» не открывает вторую |

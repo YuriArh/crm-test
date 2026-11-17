@@ -1,6 +1,7 @@
 package com.acme.dispatch.exchange.reconcile;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.acme.dispatch.carrier.CarrierClient;
@@ -9,6 +10,10 @@ import com.acme.dispatch.common.BusinessCalendar;
 import com.acme.dispatch.config.IdGenerator;
 import com.acme.dispatch.exchange.DeliveryStatus;
 import com.acme.dispatch.exchange.ExchangeProperties;
+import com.acme.dispatch.exchange.inbox.InboxDao;
+import com.acme.dispatch.exchange.inbox.InboxProcessor;
+import com.acme.dispatch.exchange.inbox.InboxSource;
+import com.acme.dispatch.exchange.inbox.ResultInbox;
 import com.acme.dispatch.exchange.inbox.ResultMessage;
 import com.acme.dispatch.exchange.reconcile.ReconciliationDao.Row;
 import com.acme.dispatch.exchange.reconcile.ReconciliationDao.State;
@@ -41,10 +46,14 @@ public class Reconciler {
     private final BusinessCalendar calendar;
     private final IdGenerator ids;
     private final ExchangeProperties properties;
+    private final ResultInbox resultInbox;
+    private final InboxDao inbox;
+    private final InboxProcessor processor;
 
     public Reconciler(CarrierClient carrier, ReconciliationDao dao, ProblemService problems,
                       TransactionTemplate transaction, BusinessCalendar calendar, IdGenerator ids,
-                      ExchangeProperties properties) {
+                      ExchangeProperties properties, ResultInbox resultInbox, InboxDao inbox,
+                      InboxProcessor processor) {
         this.carrier = carrier;
         this.dao = dao;
         this.problems = problems;
@@ -52,6 +61,9 @@ public class Reconciler {
         this.calendar = calendar;
         this.ids = ids;
         this.properties = properties;
+        this.resultInbox = resultInbox;
+        this.inbox = inbox;
+        this.processor = processor;
     }
 
     /**
@@ -105,13 +117,37 @@ public class Reconciler {
             problems.onCarrierKnowsOperation(requestId, operationId, now);
         }
 
+        UUID inboxId = null;
+        if (outcome == ReconciliationOutcome.EXTERNAL_AHEAD) {
+            TakenOver taken = takeOver(carrierResult);
+            inboxId = taken.inboxId();
+            details = details + taken.note();
+            log.info("Reconciliation EXTERNAL_AHEAD for operation {}: result {} taken over, record {}", operationId,
+                    carrierResult.messageId(), taken.note().isEmpty() ? "new" : "existing");
+        }
+
         UUID id = ids.newId();
         dao.insert(new Row(id, requestId, operationId, now, runType, performedBy, outcome, acknowledged,
-                state.delivery(), state.localResult(), carrierState, carrierResult, answer.raw(), details, null));
+                state.delivery(), state.localResult(), carrierState, carrierResult, answer.raw(), details, inboxId));
         act(outcome, requestId, operationId, state.delivery(), details, now);
         dao.schedule(requestId, now, ReconciliationRules.nextCheck(previous, signature, now,
                 properties.reconcilePause(), properties.reconcilePauseMax(), asked.carrierUnavailable()));
         return new Checked(id, outcome, asked.carrierUnavailable());
+    }
+
+    /**
+     * The carrier's result goes through the single result handler, like a feed entry: received as a record of
+     * reconciliation and processed now, in this transaction. A record of the same message from reconciliation is
+     * reused (the unique pair source + messageId); if it is held or decided already, it is left as it is.
+     */
+    private TakenOver takeOver(ResultMessage result) {
+        Optional<UUID> received = resultInbox.receive(result.raw(), InboxSource.RECONCILIATION);
+        UUID inboxId = received.orElseGet(() -> inbox.findId(InboxSource.RECONCILIATION, result.messageId())
+                .orElseThrow(() -> new IllegalStateException("Record of " + result.messageId() + " vanished")));
+        processor.process(inboxId);
+        String note = received.isPresent() ? ""
+                : "; result already received by reconciliation, record is " + inbox.statusOf(inboxId);
+        return new TakenOver(inboxId, note);
     }
 
     private void act(ReconciliationOutcome outcome, UUID requestId, UUID operationId, DeliveryStatus delivery,
@@ -140,5 +176,8 @@ public class Reconciler {
     }
 
     private record Asked(CarrierAnswer answer, boolean carrierUnavailable) {
+    }
+
+    private record TakenOver(UUID inboxId, String note) {
     }
 }

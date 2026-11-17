@@ -35,6 +35,14 @@ public class InboxDao {
                 .update() == 1;
     }
 
+    /** How a record stands now. */
+    public String statusOf(UUID inboxId) {
+        return jdbc.sql("SELECT processing_status FROM inbox WHERE id = :id")
+                .param("id", inboxId)
+                .query(String.class)
+                .single();
+    }
+
     /** The record of this message from this source, if it was received. */
     public Optional<UUID> findId(InboxSource source, String messageId) {
         return jdbc.sql("SELECT id FROM inbox WHERE source = :source AND message_id = :messageId")
@@ -76,6 +84,21 @@ public class InboxDao {
                          LIMIT 1
                            FOR UPDATE SKIP LOCKED""")
                 .param("now", toSql(now))
+                .query((rs, row) -> new Pending(rs.getObject("id", UUID.class), rs.getString("message_id"),
+                        rs.getString("payload"), rs.getInt("attempts")))
+                .optional();
+    }
+
+    /**
+     * One record, locked until the transaction ends, if it still waits for processing. A record another processor
+     * holds is skipped: that processor decides it, and waiting for it under another lock could deadlock.
+     */
+    Optional<Pending> claimById(UUID id) {
+        return jdbc.sql("""
+                        SELECT id, message_id, payload, attempts FROM inbox
+                         WHERE id = :id AND processing_status = 'RECEIVED'
+                           FOR UPDATE SKIP LOCKED""")
+                .param("id", id)
                 .query((rs, row) -> new Pending(rs.getObject("id", UUID.class), rs.getString("message_id"),
                         rs.getString("payload"), rs.getInt("attempts")))
                 .optional();
