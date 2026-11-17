@@ -27,7 +27,7 @@ describe('request card on a phone', () => {
       .getAllByRole('region')
       .map((region) => region.getAttribute('aria-label'))
       .filter((label) => label !== null);
-    expect(order).toEqual(['Содержимое', 'Результат', 'Свойства', 'Комментарий', 'Обмен с перевозчиком']);
+    expect(order).toEqual(['Содержимое', 'Результат', 'Свойства', 'Комментарий', 'Обмен с перевозчиком', 'Сверки']);
   });
 
   it('shows the save bar only while there are changes', async () => {
