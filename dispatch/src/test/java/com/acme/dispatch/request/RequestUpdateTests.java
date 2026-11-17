@@ -13,14 +13,22 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.UUID;
 
 import com.acme.dispatch.auth.AppUserRepository;
 import com.acme.dispatch.config.IdGenerator;
 import com.acme.dispatch.exchange.DispatchOperationDao;
+import com.acme.dispatch.history.RequestEventDao;
+import com.acme.dispatch.support.Contract;
 import com.acme.dispatch.support.IntegrationTest;
+import com.acme.dispatch.support.TestEvents;
 import com.acme.dispatch.support.MutableClock;
 import com.acme.dispatch.support.TestClockConfiguration;
 import com.acme.dispatch.support.TestRows;
@@ -51,6 +59,8 @@ class RequestUpdateTests {
     JdbcClient jdbc;
     @Autowired
     MutableClock clock;
+    @Autowired
+    RequestEventDao events;   // a spy, see IntegrationTest
 
     UUID requestId;
 
@@ -186,6 +196,80 @@ class RequestUpdateTests {
         mvc.perform(patch("/api/requests/" + requestId).with(asUser(users, NORTH_INITIATOR_LOGIN))
                         .contentType(MediaType.APPLICATION_JSON).content("{\"version\":0,\"comment\":\"x\"}"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void commentChangeIsRecorded() throws Exception {
+        clock.advance(Duration.ofMinutes(5));
+
+        patchAs(NORTH_INITIATOR_LOGIN, "{\"version\":0,\"comment\":\"Fragile\"}").andExpect(status().isOk());
+
+        assertThat(TestEvents.of(jdbc, requestId))
+                .containsExactly("EDITED v1 by " + NORTH_INITIATOR + " [comment: null → Fragile]");
+        assertThat(jdbc.sql("""
+                        SELECT e.occurred_at = r.updated_at FROM request_event e
+                          JOIN delivery_request r ON r.id = e.request_id WHERE e.request_id = :id""")
+                .param("id", requestId).query(Boolean.class).single()).as("the time of the change").isTrue();
+    }
+
+    @Test
+    void assigneeChangeIsRecorded() throws Exception {
+        patchAs(NORTH_OPERATOR_LOGIN, "{\"version\":0,\"assigneeId\":\"" + NORTH_OPERATOR + "\"}")
+                .andExpect(status().isOk());
+        patchAs(NORTH_OPERATOR_LOGIN, "{\"version\":1,\"assigneeId\":null}").andExpect(status().isOk());
+
+        assertThat(TestEvents.of(jdbc, requestId)).containsExactly(
+                "EDITED v1 by " + NORTH_OPERATOR + " [assigneeId: null → " + NORTH_OPERATOR + "]",
+                "EDITED v2 by " + NORTH_OPERATOR + " [assigneeId: " + NORTH_OPERATOR + " → null]");
+    }
+
+    @Test
+    void bothFieldsInOneEvent() throws Exception {
+        patchAs(NORTH_OPERATOR_LOGIN, "{\"version\":0,\"comment\":\"Mine\",\"assigneeId\":\"" + NORTH_OPERATOR
+                + "\"}").andExpect(status().isOk());
+
+        assertThat(TestEvents.of(jdbc, requestId)).containsExactly("EDITED v1 by " + NORTH_OPERATOR
+                + " [comment: null → Mine, assigneeId: null → " + NORTH_OPERATOR + "]");
+    }
+
+    @Test
+    void noopEditIsNotRecorded() throws Exception {
+        patchAs(NORTH_INITIATOR_LOGIN, "{\"version\":0,\"comment\":null}").andExpect(status().isOk());
+
+        assertThat(TestEvents.of(jdbc, requestId)).isEmpty();
+    }
+
+    @Test
+    void forbiddenEditIsNotRecorded() throws Exception {
+        patchAs(NORTH_INITIATOR_LOGIN, "{\"version\":0,\"assigneeId\":\"" + NORTH_OPERATOR + "\"}")
+                .andExpect(status().isForbidden());
+
+        assertThat(TestEvents.of(jdbc, requestId)).isEmpty();
+    }
+
+    @Test
+    void staleEditIsNotRecorded() throws Exception {
+        patchAs(NORTH_OPERATOR_LOGIN, "{\"version\":0,\"comment\":\"first\"}").andExpect(status().isOk());
+
+        patchAs(NORTH_INITIATOR_LOGIN, "{\"version\":0,\"comment\":\"second\"}").andExpect(status().isConflict());
+
+        assertThat(TestEvents.of(jdbc, requestId)).hasSize(1);
+    }
+
+    @Test
+    void refusedEventRollsBackTheEdit() throws Exception {
+        doThrow(new IllegalStateException("simulated: event refused")).when(events).insert(any());
+
+        mvc.perform(patch("/api/requests/" + requestId)
+                        .with(asUser(users, NORTH_INITIATOR_LOGIN))
+                        .with(csrf())
+                        .header(Contract.SKIP_HEADER, "an unexpected failure; 500 is not a documented answer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"version\":0,\"comment\":\"Fragile\"}"))
+                .andExpect(status().isInternalServerError());
+
+        assertThat(jdbc.sql("SELECT coalesce(comment, '-') || '/' || version FROM delivery_request WHERE id = :id")
+                .param("id", requestId).query(String.class).single()).isEqualTo("-/0");
     }
 
     private ResultActions patchAs(String login, String body) throws Exception {
