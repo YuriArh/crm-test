@@ -61,6 +61,7 @@ make build             # ./gradlew build (with tests)
 make reset             # stop everything and delete the DB volume
 make logs              # follow dispatch logs (make logs-carrier — emulator)
 make e2e               # e2e tests against the running stack (waits for both services first)
+make seed              # demo requests through the API, four of them through carrier fault modes one at a time (docs/specs/demo-seed.md; needs jq); switches every fault mode off on start and exit
 make carrier-ops       # emulator operations with receivedCount / executionCount / faults / resultPublishAt
 make faults            # current emulator fault modes
 make fault-unavailable # switch on only one fault mode (also fault-lose-response, fault-duplicate, fault-delayed, fault-malformed)

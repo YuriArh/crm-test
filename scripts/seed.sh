@@ -5,15 +5,53 @@
 # Safe to re-run: each request has a fixed Idempotency-Key, so a repeat creates nothing new
 # (the same day: the stored response is replayed; another day: the key is reported as used).
 #
+# Some requests go through the carrier emulator's fault modes (docs/specs/demo-seed.md). The modes are global, so
+# the seed switches them all off when it starts and whenever it exits — on an error and on Ctrl+C too.
+#
 # Usage: scripts/seed.sh [dispatch base URL]   (default http://localhost:8080; needs curl and jq)
+#        CARRIER_BASE_URL — the emulator (default http://localhost:8081)
 set -euo pipefail
 
 API="${1:-${E2E_BASE_URL:-http://localhost:8080}}"
+CARRIER="${CARRIER_BASE_URL:-http://localhost:8081}"
 PASSWORD=demo1234
 WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT
 
 command -v jq >/dev/null || { echo "seed: jq is required" >&2; exit 1; }
+
+FAULTS_OFF='{"unavailable":false,"loseResponse":false,"duplicate":false,"delayed":false,"malformed":false}'
+
+# put_faults <json>: the emulator's switches as a whole object (all five modes).
+put_faults() {
+  curl -sf -X PUT -H 'Content-Type: application/json' -d "$1" "$CARRIER/admin/faults" >/dev/null \
+    || { echo "seed: cannot set the fault modes at $CARRIER" >&2; return 1; }
+}
+
+# set_faults <mode...>: switches on exactly these modes and every other one off.
+set_faults() {
+  local body=$FAULTS_OFF mode
+  for mode in "$@"; do body=$(jq -c --arg m "$mode" '.[$m] = true' <<<"$body"); done
+  put_faults "$body"
+}
+
+faults_off() { put_faults "$FAULTS_OFF"; }
+
+# On every exit: no fault mode is left on, whatever happened. A failure here is reported, the exit code is kept.
+cleanup() {
+  local status=$?
+  faults_off || echo "seed: fault modes may still be on — run make fault-off" >&2
+  rm -rf "$WORK"
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Starts from a known state: a tester may have left a mode on.
+on=$(curl -sf "$CARRIER/admin/faults" | jq -r 'to_entries | map(select(.value)) | map(.key) | join(", ")') \
+  || { echo "seed: carrier emulator is not reachable at $CARRIER" >&2; exit 1; }
+[ -z "$on" ] || echo "Fault modes were on: $on — switching them off"
+faults_off
 
 # Deadline N days from today in the business time zone.
 deadline() {
@@ -40,7 +78,16 @@ call() {
        -H 'Content-Type: application/json' -w '\n%{http_code}' "$@"
 }
 
-# create <user> <key> <cargo> <weight> <address> <days>: prints the request id ("" if the key was used before).
+# An ISO instant of dispatch as epoch seconds (fractions dropped).
+EPOCH='sub("\\.[0-9]+"; "") | fromdateiso8601'
+
+# The start of this run by dispatch's clock, which also stamps createdAt — not the clock of this machine.
+RUN_STARTED=$(curl -sf "$API/api/system/info" | jq -r ".serverTime | $EPOCH") \
+  || { echo "seed: dispatch is not reachable at $API" >&2; exit 1; }
+
+# create <user> <key> <cargo> <weight> <address> <days>: prints the request id ("" if the key was used another
+# day). A request created before this run — replayed the same day, or the key used another day — is marked as
+# such (`existed <key>`): a fault scenario cannot be played on it, faults apply at the first receipt only.
 create() {
   local user=$1 key=$2 body out status
   body=$(jq -nc --arg c "$3" --argjson w "$4" --arg a "$5" --arg d "$(deadline "$6")" \
@@ -48,27 +95,41 @@ create() {
   out=$(call "$user" -H "Idempotency-Key: $key" -d "$body" "$API/api/requests")
   status=$(tail -n1 <<<"$out")
   case "$status" in
-    200|201) sed '$d' <<<"$out" | jq -r .id ;;
+    200|201)
+      if sed '$d' <<<"$out" | jq -e --argjson started "$RUN_STARTED" ".createdAt | $EPOCH < \$started" >/dev/null; then
+        touch "$WORK/$key.existed"
+      fi
+      sed '$d' <<<"$out" | jq -r .id ;;
     422) if sed '$d' <<<"$out" | jq -e '.code == "IDEMPOTENCY_KEY_REUSED"' >/dev/null; then
-           echo "  $key: already created earlier, skipped" >&2; echo ""
+           echo "  $key: already created earlier, skipped" >&2; touch "$WORK/$key.existed"; echo ""
          else echo "seed: $key rejected: $(sed '$d' <<<"$out")" >&2; exit 1; fi ;;
     *) echo "seed: $key failed with HTTP $status: $(sed '$d' <<<"$out")" >&2; exit 1 ;;
   esac
 }
 
-# final_card <user> <id>: waits up to 30 s for the carrier's final result, prints the card.
-final_card() {
-  local card
-  for _ in $(seq 1 30); do
-    card=$(call "$1" "$API/api/requests/$2" | sed '$d')
-    if jq -e '.businessStatus == "SUCCEEDED" or .businessStatus == "REJECTED"' <<<"$card" >/dev/null; then
-      echo "$card"; return
-    fi
+# existed <key>: the request of this key was created before this run.
+existed() { [ -e "$WORK/$1.existed" ]; }
+
+# The state of a card in one line, for progress and for errors.
+STATE='"\(.number): \(.businessStatus), delivery \(.deliveryStatus), attempts \(.exchange.attempts // "—"), problems \([.problems[]? | "\(.kind) \(.status)"] | if length == 0 then "none" else join(", ") end)"'
+
+# wait_card <user> <id> <jq condition> <seconds> <what>: asks for the card every second until the condition holds,
+# prints the card. Gives up with the request, what was awaited and the last state seen.
+wait_card() {
+  local user=$1 id=$2 condition=$3 seconds=$4 what=$5 card=''
+  for _ in $(seq 1 "$seconds"); do
+    card=$(call "$user" "$API/api/requests/$id" | sed '$d')
+    if jq -e "$condition" <<<"$card" >/dev/null 2>&1; then echo "$card"; return; fi
     sleep 1
   done
-  echo "seed: request $2 got no result in 30 s (is carrier-emulator running?)" >&2
+  echo "seed: request $id: no $what in $seconds s; last state: $(jq -r "$STATE" <<<"$card" 2>/dev/null || echo "$card")" >&2
   exit 1
 }
+
+FINAL='.businessStatus == "SUCCEEDED" or .businessStatus == "REJECTED"'
+
+# final_card <user> <id>: waits up to 30 s for the carrier's final result, prints the card.
+final_card() { wait_card "$1" "$2" "$FINAL" 30 "final result"; }
 
 # patch <user> <id> <json fields>: edits a request with its current version.
 patch() {
@@ -81,14 +142,17 @@ patch() {
 echo "Seeding demo data at $API"
 for user in north.initiator south.initiator north.operator; do login "$user"; done
 
+# Every request of the seed as "author|key|id" (id empty when the key was used another day), for the summary.
 ids=()
-n1=$(create north.initiator seed-north-1 "Паллеты с плиткой"      480     "Северная ул., 12"            5);  ids+=("north.initiator:$n1")
-n2=$(create north.initiator seed-north-2 "Офисная мебель"          95.5    "пр. Мира, 7, офис 3"         3);  ids+=("north.initiator:$n2")
-n3=$(create north.initiator seed-north-3 "Станок токарный"         12500   "Промзона Северная, корп. 4"  10); ids+=("north.initiator:$n3")
-n4=$(create north.initiator seed-north-4 "Документы"               0.5     "тест-отказ, ул. Нет, 0"      1);  ids+=("north.initiator:$n4")
-s1=$(create south.initiator seed-south-1 "Фрукты, 40 ящиков"       320     "Южная ул., 3"                2);  ids+=("south.initiator:$s1")
-s2=$(create south.initiator seed-south-2 "Стройматериалы"          2300    "пос. Солнечный, д. 15"       14); ids+=("south.initiator:$s2")
-s3=$(create south.initiator seed-south-3 "Генератор дизельный"     10500   "Морской порт, причал 2"      7);  ids+=("south.initiator:$s3")
+track() { ids+=("$1|$2|$3"); }
+
+n1=$(create north.initiator seed-north-1 "Паллеты с плиткой"      480     "Северная ул., 12"            5);  track north.initiator seed-north-1 "$n1"
+n2=$(create north.initiator seed-north-2 "Офисная мебель"          95.5    "пр. Мира, 7, офис 3"         3);  track north.initiator seed-north-2 "$n2"
+n3=$(create north.initiator seed-north-3 "Станок токарный"         12500   "Промзона Северная, корп. 4"  10); track north.initiator seed-north-3 "$n3"
+n4=$(create north.initiator seed-north-4 "Документы"               0.5     "тест-отказ, ул. Нет, 0"      1);  track north.initiator seed-north-4 "$n4"
+s1=$(create south.initiator seed-south-1 "Фрукты, 40 ящиков"       320     "Южная ул., 3"                2);  track south.initiator seed-south-1 "$s1"
+s2=$(create south.initiator seed-south-2 "Стройматериалы"          2300    "пос. Солнечный, д. 15"       14); track south.initiator seed-south-2 "$s2"
+s3=$(create south.initiator seed-south-3 "Генератор дизельный"     10500   "Морской порт, причал 2"      7);  track south.initiator seed-south-3 "$s3"
 
 # The operator takes two North requests; the initiator leaves a comment on another one.
 operator=$(call north.operator "$API/api/auth/me" | sed '$d' | jq -r .id)
@@ -96,11 +160,86 @@ operator=$(call north.operator "$API/api/auth/me" | sed '$d' | jq -r .id)
 [ -n "$n3" ] && patch north.operator "$n3" "{\"assigneeId\":\"$operator\",\"comment\":\"Уточнить у клиента: разбить на две отправки\"}"
 [ -n "$n2" ] && patch north.initiator "$n2" '{"comment":"Хрупкое, не кантовать"}'
 
-echo "Created requests and their outcomes:"
+# Fault modes are global: no request above may still be on its way when one is switched on.
 for entry in "${ids[@]}"; do
-  user=${entry%%:*}; id=${entry#*:}
-  [ -n "$id" ] || continue
-  final_card "$user" "$id" | jq -r --arg u "$user" \
-    '"  \(.number)  \($u)  \(.businessStatus)  \(.result.trackingNumber // .result.rejectionReason)"'
+  IFS='|' read -r user _ id <<<"$entry"
+  [ -z "$id" ] || final_card "$user" "$id" >/dev/null
 done
+
+# scenario <key> "<modes>" <jq point> <what> <cargo> <weight> <address> <days> [after]: a North request created
+# under these fault modes; once its card reaches the point, every mode goes off, `after <id>` runs (if given),
+# and the request is awaited to its result — before the next scenario, as the modes are global
+# (docs/specs/demo-seed.md §2.2). A request created before this run is only reported: faults apply at the first
+# receipt, so nothing would be reproduced on it.
+scenario() {
+  local key=$1 point=$3 what=$4 after=${9:-} modes id
+  read -ra modes <<<"$2"
+  set_faults "${modes[@]}"
+  id=$(create north.initiator "$key" "$5" "$6" "$7" "$8")
+  track north.initiator "$key" "$id"
+  if existed "$key"; then
+    faults_off
+    [ -z "$id" ] || echo "  $key: created before this run, not replayed — $(call north.operator "$API/api/requests/$id" | sed '$d' | jq -r "$STATE")"
+    return
+  fi
+  echo "  $key: ${modes[*]} on, waiting for $what"
+  wait_card north.operator "$id" "$point" 90 "$what" >/dev/null
+  faults_off
+  [ -z "$after" ] || "$after" "$id"
+  echo "  $key: $(wait_card north.operator "$id" "$FINAL" 90 "final result" | jq -r "$STATE")"
+}
+
+echo "Requests through the carrier's fault modes, one at a time:"
+scenario seed-north-5 "unavailable" '.exchange.attempts >= 2' "a second send attempt" \
+  "Холодильное оборудование" 850 "ул. Заводская, 21" 6
+# loseResponse alone gives no UNKNOWN: the result in the feed confirms the delivery before the send times out.
+# With delayed the result comes 15 s later; the UNKNOWN lasts ~5 s until the resend, so its problem counts too.
+scenario seed-north-6 "loseResponse delayed" \
+  '.deliveryStatus == "UNKNOWN" or any(.problems[]?; .kind == "DELIVERY_UNKNOWN")' "an unknown delivery" \
+  "Медицинские расходники" 40 "Больничный пр., 5" 2
+# The carrier remembers duplicate per operation at its first receipt: switching it off then keeps the duplicates.
+scenario seed-north-7 "duplicate" '.deliveryStatus == "ACKNOWLEDGED"' "the carrier's receipt" \
+  "Бумага офисная, 60 коробок" 610 "ул. Печатная, 9" 4
+
+# reconcile_now <id>: «Сверить сейчас» by the operator. The background would take the request only after 2 min;
+# here the carrier's result is taken over at once, and the check shows in the card with its author.
+reconcile_now() {
+  local out outcome
+  out=$(call north.operator -X POST -H "Idempotency-Key: seed-north-8-reconcile" "$API/api/requests/$1/reconcile")
+  [ "$(tail -n1 <<<"$out")" = 200 ] || { echo "seed: reconciliation of $1 failed: $out" >&2; exit 1; }
+  outcome=$(sed '$d' <<<"$out" | jq -r .outcome)
+  echo "  seed-north-8: «Сверить сейчас» — $outcome"
+  # Not an error: a run longer than 2 min may have let the background take the result first.
+  [ "$outcome" = EXTERNAL_AHEAD ] || echo "  seed-north-8: expected EXTERNAL_AHEAD: $(sed '$d' <<<"$out" | jq -r .details)" >&2
+}
+
+# malformed spoils the price of a SUCCEEDED result in the feed only: the record is INVALID and stays a problem for
+# the operator («Разобрано»), while the carrier itself has the right result for reconciliation to take over.
+# «В работе» and the result are published together, so «В работе» means the spoiled record has been read.
+scenario seed-north-8 "malformed" '.businessStatus == "IN_PROGRESS"' "the spoiled result to be read" \
+  "Электроника, 12 коробок" 150 "Технопарк, стр. 3" 3 reconcile_now
+
+# The summary (docs/specs/demo-seed.md §2.4). North cards are read as the operator, who sees the delivery and
+# the problems; South cards as their initiator (no operator of South exists), so they show no problems.
+echo "Requests of the seed:"
+{
+  printf 'Number\tKey\tAuthor\tResult\tTracking / reason\tDelivery\tOpen problems\n'
+  for entry in "${ids[@]}"; do
+    IFS='|' read -r user key id <<<"$entry"
+    if [ -z "$id" ]; then
+      printf -- '—\t%s\t%s\tcreated another day, not shown\t\t\t\n' "$key" "$user"
+      continue
+    fi
+    reader=$user
+    [ "$user" != north.initiator ] || reader=north.operator
+    final_card "$reader" "$id" | jq -r --arg key "$key" --arg u "$user" '[
+      .number, $key, $u, .businessStatus,
+      (.result.trackingNumber // .result.rejectionReason // "—"),
+      .deliveryStatus,
+      (if .problems == null then "—"
+       else [.problems[] | select(.status == "OPEN") | .kind] | if length == 0 then "none" else join(", ") end end)
+    ] | @tsv'
+  done
+} | column -t -s $'\t' | sed 's/^/  /'
+echo "Every operation is executed by the carrier once: make carrier-ops shows executionCount = 1 for each."
 echo "Done. Sign in at the web client as north.initiator / north.operator / south.initiator (password $PASSWORD)."
