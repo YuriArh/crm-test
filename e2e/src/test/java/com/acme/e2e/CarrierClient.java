@@ -3,6 +3,7 @@ package com.acme.e2e;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -85,6 +86,27 @@ public final class CarrierClient {
 
     public void faultsOff() {
         setFaults(Faults.OFF);
+    }
+
+    // --- demo scenarios (docs/specs/carrier-scenarios.md) ---
+
+    /** {@code PUT /admin/operations/{id}/result}: the carrier changes an executed operation's result to a success. */
+    public void changeResult(String operationId, String trackingNumber, BigDecimal price) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", "SUCCEEDED");
+        body.put("trackingNumber", trackingNumber);
+        body.put("price", price);
+        body.put("reason", null);
+        E2eClient.Response response =
+                send(jsonRequest("/admin/operations/" + operationId + "/result").PUT(jsonBody(body)), TIMEOUT);
+        assertThat(response.status()).as("PUT …/result of %s: %s", operationId, response.body()).isEqualTo(200);
+    }
+
+    /** {@code DELETE /admin/operations/{id}}: the carrier loses the operation. */
+    public void forget(String operationId) {
+        E2eClient.Response response = send(HttpRequest.newBuilder(uri("/admin/operations/" + operationId)).DELETE(),
+                TIMEOUT);
+        assertThat(response.status()).as("DELETE operation %s: %s", operationId, response.body()).isEqualTo(204);
     }
 
     // --- service view of operations ---

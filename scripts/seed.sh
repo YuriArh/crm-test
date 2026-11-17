@@ -166,15 +166,16 @@ for entry in "${ids[@]}"; do
   [ -z "$id" ] || final_card "$user" "$id" >/dev/null
 done
 
-# scenario <key> "<modes>" <jq point> <what> <cargo> <weight> <address> <days> [after]: a North request created
-# under these fault modes; once its card reaches the point, every mode goes off, `after <id>` runs (if given),
-# and the request is awaited to its result — before the next scenario, as the modes are global
-# (docs/specs/demo-seed.md §2.2). A request created before this run is only reported: faults apply at the first
-# receipt, so nothing would be reproduced on it.
+# scenario <key> "<modes>" <jq point> <what> <cargo> <weight> <address> <days> [after [<jq end> <end what>]]: a North
+# request created under these fault modes; once its card reaches the point, every mode goes off, `after <id>` runs
+# (if given), and the request is awaited to its end — its result unless told otherwise — before the next scenario,
+# as the modes are global (docs/specs/demo-seed.md §2.2). A request created before this run is only reported:
+# faults and scenarios apply at the first receipt, so nothing would be reproduced on it.
 scenario() {
-  local key=$1 point=$3 what=$4 after=${9:-} modes id
+  local key=$1 point=$3 what=$4 after=${9:-} end=${10:-$FINAL} end_what=${11:-final result} modes id
   read -ra modes <<<"$2"
-  set_faults "${modes[@]}"
+  # ${a[@]+…}: an empty array is "unbound" for set -u in the bash 3.2 of macOS.
+  set_faults ${modes[@]+"${modes[@]}"}
   id=$(create north.initiator "$key" "$5" "$6" "$7" "$8")
   track north.initiator "$key" "$id"
   if existed "$key"; then
@@ -182,11 +183,11 @@ scenario() {
     [ -z "$id" ] || echo "  $key: created before this run, not replayed — $(call north.operator "$API/api/requests/$id" | sed '$d' | jq -r "$STATE")"
     return
   fi
-  echo "  $key: ${modes[*]} on, waiting for $what"
+  echo "  $key: ${modes[*]:+${modes[*]} on, }waiting for $what"
   wait_card north.operator "$id" "$point" 90 "$what" >/dev/null
   faults_off
   [ -z "$after" ] || "$after" "$id"
-  echo "  $key: $(wait_card north.operator "$id" "$FINAL" 90 "final result" | jq -r "$STATE")"
+  echo "  $key: $(wait_card north.operator "$id" "$end" 90 "$end_what" | jq -r "$STATE")"
 }
 
 echo "Requests through the carrier's fault modes, one at a time:"
@@ -201,23 +202,59 @@ scenario seed-north-6 "loseResponse delayed" \
 scenario seed-north-7 "duplicate" '.deliveryStatus == "ACKNOWLEDGED"' "the carrier's receipt" \
   "Бумага офисная, 60 коробок" 610 "ул. Печатная, 9" 4
 
-# reconcile_now <id>: «Сверить сейчас» by the operator. The background would take the request only after 2 min;
-# here the carrier's result is taken over at once, and the check shows in the card with its author.
+# reconcile_now <id> <key> <expected outcome>: «Сверить сейчас» by the operator, with the Idempotency-Key
+# <key>-reconcile. The background would take a request without a result only after 2 min, and one with a result
+# never; the check shows in the card with its author.
 reconcile_now() {
   local out outcome
-  out=$(call north.operator -X POST -H "Idempotency-Key: seed-north-8-reconcile" "$API/api/requests/$1/reconcile")
+  out=$(call north.operator -X POST -H "Idempotency-Key: $2-reconcile" "$API/api/requests/$1/reconcile")
   [ "$(tail -n1 <<<"$out")" = 200 ] || { echo "seed: reconciliation of $1 failed: $out" >&2; exit 1; }
   outcome=$(sed '$d' <<<"$out" | jq -r .outcome)
-  echo "  seed-north-8: «Сверить сейчас» — $outcome"
-  # Not an error: a run longer than 2 min may have let the background take the result first.
-  [ "$outcome" = EXTERNAL_AHEAD ] || echo "  seed-north-8: expected EXTERNAL_AHEAD: $(sed '$d' <<<"$out" | jq -r .details)" >&2
+  echo "  $2: «Сверить сейчас» — $outcome"
+  # Not an error: the background may have checked the request first, or the carrier's timing differed.
+  [ "$outcome" = "$3" ] || echo "  $2: expected $3: $(sed '$d' <<<"$out" | jq -r .details)" >&2
+}
+
+operation_of() { call north.operator "$API/api/requests/$1" | sed '$d' | jq -r .operationId; }
+
+# The carrier's demo scenarios (docs/specs/carrier-scenarios.md): it changes a result, or loses an operation.
+change_result() {
+  curl -sf -X PUT -H 'Content-Type: application/json' \
+       -d '{"status":"SUCCEEDED","trackingNumber":"TRK-FFFFFFFF","price":999.00,"reason":null}' \
+       "$CARRIER/admin/operations/$(operation_of "$1")/result" >/dev/null \
+    || { echo "seed: the carrier did not change the result of $1" >&2; exit 1; }
+}
+forget_operation() {
+  curl -sf -X DELETE "$CARRIER/admin/operations/$(operation_of "$1")" >/dev/null \
+    || { echo "seed: the carrier did not forget the operation of $1" >&2; exit 1; }
 }
 
 # malformed spoils the price of a SUCCEEDED result in the feed only: the record is INVALID and stays a problem for
 # the operator («Разобрано»), while the carrier itself has the right result for reconciliation to take over.
 # «В работе» and the result are published together, so «В работе» means the spoiled record has been read.
+after_8() { reconcile_now "$1" seed-north-8 EXTERNAL_AHEAD; }
 scenario seed-north-8 "malformed" '.businessStatus == "IN_PROGRESS"' "the spoiled result to be read" \
-  "Электроника, 12 коробок" 150 "Технопарк, стр. 3" 3 reconcile_now
+  "Электроника, 12 коробок" 150 "Технопарк, стр. 3" 3 after_8
+
+# Requests left for the operator to decide on: the carrier changes its result or loses the operation, and
+# «Сверить сейчас» finds it. The seed decides nothing.
+open_problem() { echo "any(.problems[]?; .kind == \"$1\" and .status == \"OPEN\")"; }
+
+after_9() { change_result "$1"; reconcile_now "$1" seed-north-9 CONFLICT; }
+scenario seed-north-9 "" "$FINAL" "a final result" \
+  "Мебель для кафе, 30 мест" 720 "ул. Береговая, 8" 5 after_9 \
+  "$(open_problem RECONCILIATION_CONFLICT)" "an open reconciliation conflict"
+
+after_10() { forget_operation "$1"; reconcile_now "$1" seed-north-10 EXTERNAL_MISSING; }
+scenario seed-north-10 "" "$FINAL" "a final result" \
+  "Запчасти для насосов" 95 "Промышленная ул., 40" 4 after_10 \
+  "$(open_problem EXTERNAL_MISSING)" "an open lost operation"
+
+# Lost before its result: delayed holds the result back for 15 s, the operation is forgotten within seconds.
+after_11() { forget_operation "$1"; reconcile_now "$1" seed-north-11 EXTERNAL_MISSING; }
+scenario seed-north-11 "delayed" '.deliveryStatus == "ACKNOWLEDGED"' "the carrier's receipt" \
+  "Спортивный инвентарь" 210 "ул. Олимпийская, 2" 6 after_11 \
+  "$(open_problem EXTERNAL_MISSING)" "an open lost operation"
 
 # The summary (docs/specs/demo-seed.md §2.4). North cards are read as the operator, who sees the delivery and
 # the problems; South cards as their initiator (no operator of South exists), so they show no problems.
@@ -232,7 +269,8 @@ echo "Requests of the seed:"
     fi
     reader=$user
     [ "$user" != north.initiator ] || reader=north.operator
-    final_card "$reader" "$id" | jq -r --arg key "$key" --arg u "$user" '[
+    # Every request has reached its end above; one waiting for the operator has no result yet.
+    call "$reader" "$API/api/requests/$id" | sed '$d' | jq -r --arg key "$key" --arg u "$user" '[
       .number, $key, $u, .businessStatus,
       (.result.trackingNumber // .result.rejectionReason // "—"),
       .deliveryStatus,

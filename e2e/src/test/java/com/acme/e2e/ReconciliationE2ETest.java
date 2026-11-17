@@ -34,7 +34,6 @@ class ReconciliationE2ETest {
     static final String CARRIER_TRACKING = "TRK-FFFFFFFF";
 
     final CarrierClient carrier = new CarrierClient();
-    final CarrierDatabase carrierDatabase = new CarrierDatabase();
     final E2eClient initiator = E2eClient.signedInAs("north.initiator");
     final E2eClient operator = E2eClient.signedInAs("north.operator");
 
@@ -149,13 +148,38 @@ class ReconciliationE2ETest {
         assertThat(initiator.get("/api/requests/" + id).body().has("reconciliations")).isFalse();
     }
 
+    /**
+     * The carrier lost an operation before its result was published ({@code docs/specs/carrier-scenarios.md}):
+     * «Сверить сейчас» finds it missing, and as there is no result the operator may send it again.
+     */
+    @Test
+    void forgottenOperationWithoutAResultCanBeRetried() {
+        carrier.setFaults(Faults.DELAYED);
+        String id = create(uniqueCargo("forgotten operation"));
+        JsonNode acknowledged = Awaits.card(operator, id, "ACKNOWLEDGED",
+                card -> card.get("deliveryStatus").asString().equals("ACKNOWLEDGED"), TIMEOUT);
+        carrier.faultsOff();
+        carrier.forget(acknowledged.get("operationId").asString());
+
+        E2eClient.Response reconciled = operator.post("/api/requests/" + id + "/reconcile", null,
+                idempotencyKey(newKey()));
+
+        assertThat(reconciled.status()).isEqualTo(200);
+        assertThat(reconciled.body().get("outcome").asString()).isEqualTo("EXTERNAL_MISSING");
+        JsonNode card = operator.get("/api/requests/" + id).body();
+        assertThat(card.get("actions").valueStream().map(JsonNode::asString)).contains("RETRY");
+        assertThat(card.get("problems").valueStream()
+                .filter(p -> p.get("kind").asString().equals("EXTERNAL_MISSING"))
+                .filter(p -> p.get("status").asString().equals("OPEN"))).hasSize(1);
+    }
+
     /** A finished request whose result the carrier then changed, checked by «Сверить сейчас»: a conflict is open. */
     private Conflict conflict(String what) {
         String id = create(uniqueCargo(what));
         JsonNode finished = Awaits.finalCard(operator, id);
         String operationId = finished.get("operationId").asString();
         assertThat(finished.path("result").path("trackingNumber").asString("")).isNotEqualTo(CARRIER_TRACKING);
-        carrierDatabase.changeResult(operationId, CARRIER_TRACKING, new BigDecimal("999.00"));
+        carrier.changeResult(operationId, CARRIER_TRACKING, new BigDecimal("999.00"));
 
         E2eClient.Response reconciled = operator.post("/api/requests/" + id + "/reconcile", null,
                 idempotencyKey(newKey()));

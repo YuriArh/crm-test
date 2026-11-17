@@ -1,8 +1,14 @@
 import { expect, test } from '@playwright/test';
 import { signInViaApi } from '../auth/helpers';
 import { createRequestViaApi, uniqueCargo } from '../requests/helpers';
-import { allFaultsOff, requireCarrier, setFaults, waitForDeferredResult, waitForReceipt } from './carrier';
-import { changeCarrierResult } from './carrierDb';
+import {
+  allFaultsOff,
+  changeCarrierResult,
+  requireCarrier,
+  setFaults,
+  waitForDeferredResult,
+  waitForReceipt,
+} from './carrier';
 
 // Problems from real emulator faults (web-problems.md §10.4). The switches are global, so this file runs in the
 // `faults` project: after every other test, one test at a time, every switch off before and after each test.
@@ -132,8 +138,8 @@ test('a resolved reconciliation conflict still shows what differed', async ({ pa
     operationId = card.operationId;
     expect(['SUCCEEDED', 'REJECTED']).toContain(card.businessStatus);
   }).toPass({ timeout: SYSTEM_TIMEOUT });
-  // The carrier changed its result at home (docs/specs/demo-seed.md §8.1).
-  changeCarrierResult(operationId, 'TRK-FFFFFFFF', '999.00');
+  // The carrier changed its result at home (docs/specs/carrier-scenarios.md).
+  await changeCarrierResult(operationId, 'TRK-FFFFFFFF', 999);
 
   await page.goto(`/requests/${request.id}`);
   const exchange = page.getByRole('region', { name: 'Обмен с перевозчиком' });

@@ -93,6 +93,8 @@
 | `GET /admin/faults` | текущие режимы |
 | `PUT /admin/faults` | включить/выключить режимы (тело — все четыре выключателя) |
 | `GET /admin/operations[?operationId=…]` | операции: статус, итог, `receivedCount`, `executionCount`, запомненные `faults`, `resultPublishAt` |
+| `PUT /admin/operations/{operationId}/result` | сценарий «перевозчик изменил итог»: новый итог исполненной операции с новым `messageId`, лента не меняется; `409 OPERATION_NOT_SETTLED`, пока итог не исполнен или ждёт отложенной публикации (`docs/specs/carrier-scenarios.md`) |
+| `DELETE /admin/operations/{operationId}` | сценарий «перевозчик потерял операцию»: операция и её записи ленты удаляются; повторная отправка — новая операция |
 
 - Обёртки в Makefile: `make faults`, `make fault-unavailable`, `make fault-lose-response`, `make fault-duplicate`, `make fault-delayed` (каждая включает только свой режим), `make fault-off`, `make carrier-ops`.
 - Отдельного сброса нет — `make reset`.
@@ -104,7 +106,8 @@
 | `operation` | `operation_id` (PK), содержимое, хэш содержимого, `state` (`ACCEPTED` / `EXECUTED`), итог (`result_status`, `tracking_number`, `price`, `reason`), `received_count`, `received_at`, `executed_at`; для сбоев (`V2`): запомненные `fault_duplicate` / `fault_delayed`, `in_progress_message_id` / `result_message_id` (задаются при исполнении — один и тот же `messageId` в ленте и в `GET /operations`), `result_publish_at` (срок отложенной публикации) |
 | `feed_entry` | `feed_seq` (`bigserial`), `message_id` (UUIDv7), `operation_id`, `sequence`, статус и поля результата, `occurred_at` |
 
-Записи не удаляются: объём мал, лента нужна для сверки и разбора. Правила схемы — как в `dispatch` (CLAUDE.md, раздел о миграциях).
+Записи не удаляются: объём мал, лента нужна для сверки и разбора. Исключение — сценарий «перевозчик потерял
+операцию» (`DELETE /admin/operations/{operationId}`). Правила схемы — как в `dispatch` (CLAUDE.md, раздел о миграциях).
 
 ## 9. Тесты
 

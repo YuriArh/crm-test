@@ -19,8 +19,6 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.assertj:assertj-core")
     testImplementation("tools.jackson.core:jackson-databind")
-    // CarrierDatabase: the carrier changes its own data, as in the manual checks of docs/specs/demo-seed.md §8.
-    testRuntimeOnly("org.postgresql:postgresql")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -30,9 +28,5 @@ tasks.test {
     }
     systemProperty("e2e.baseUrl", providers.environmentVariable("E2E_BASE_URL").getOrElse("http://localhost:8080"))
     systemProperty("e2e.carrierUrl", providers.environmentVariable("CARRIER_BASE_URL").getOrElse("http://localhost:8081"))
-    systemProperty("e2e.carrierDbUrl",
-        providers.environmentVariable("CARRIER_DB_URL").getOrElse("jdbc:postgresql://localhost:5432/carrier"))
-    systemProperty("e2e.carrierDbUser", providers.environmentVariable("CARRIER_DB_USER").getOrElse("carrier"))
-    systemProperty("e2e.carrierDbPassword", providers.environmentVariable("CARRIER_DB_PASSWORD").getOrElse("carrier"))
     outputs.upToDateWhen { false }
 }

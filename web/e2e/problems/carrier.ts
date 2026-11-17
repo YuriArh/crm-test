@@ -68,6 +68,22 @@ export async function waitForDeferredResult(operationId: string, timeoutMs = 30_
   }
 }
 
+/**
+ * The carrier changes an executed operation's result to a success (`PUT /admin/operations/{id}/result`,
+ * docs/specs/carrier-scenarios.md); `GET /operations/{id}` shows it at once, the feed stays as it was.
+ */
+export async function changeCarrierResult(operationId: string, trackingNumber: string, price: number): Promise<void> {
+  const carrier = await playwrightRequest.newContext({ baseURL: CARRIER_BASE_URL });
+  try {
+    const response = await carrier.put(`/admin/operations/${operationId}/result`, {
+      data: { status: 'SUCCEEDED', trackingNumber, price, reason: null },
+    });
+    if (!response.ok()) throw new Error(`PUT …/result of ${operationId}: ${response.status()} ${await response.text()}`);
+  } finally {
+    await carrier.dispose();
+  }
+}
+
 /** Skips the test, with the reason, when the emulator cannot be reached (no stand running). */
 export async function requireCarrier(): Promise<void> {
   const carrier = await playwrightRequest.newContext({ baseURL: CARRIER_BASE_URL });
