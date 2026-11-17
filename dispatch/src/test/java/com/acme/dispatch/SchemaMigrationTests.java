@@ -42,7 +42,7 @@ class SchemaMigrationTests {
     @Test
     void allMigrationsAreApplied() {
         assertThat(Arrays.stream(flyway.info().applied()).map(MigrationInfo::getVersion).map(Object::toString))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11");
     }
 
     @Test
@@ -496,7 +496,7 @@ class SchemaMigrationTests {
         jdbc.sql("""
                         INSERT INTO inbox (id, message_id, feed_seq, payload, source, processing_status, received_at)
                         VALUES (:id, :message, 1, '{}', 'FEED', 'APPLIED', :now)
-                        ON CONFLICT (message_id) WHERE message_id IS NOT NULL
+                        ON CONFLICT (source, message_id) WHERE message_id IS NOT NULL
                         DO UPDATE SET duplicate_count = inbox.duplicate_count + 1, last_duplicate_at = :now""")
                 .param("id", UUID.randomUUID())
                 .param("message", messageId)

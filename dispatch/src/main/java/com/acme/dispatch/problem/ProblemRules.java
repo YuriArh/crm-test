@@ -64,6 +64,7 @@ public final class ProblemRules {
                     : List.of(ProblemDecision.KEEP_OURS);
             case INVALID_MESSAGE, MESSAGE_FAILED -> List.of(ProblemDecision.ACKNOWLEDGED);
             case DELIVERY_UNKNOWN, DELIVERY_FAILED -> List.of();
+            case EXTERNAL_MISSING, RECONCILIATION_CONFLICT -> List.of();
         };
     }
 

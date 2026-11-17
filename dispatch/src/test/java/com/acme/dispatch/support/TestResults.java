@@ -43,7 +43,12 @@ public class TestResults {
 
     /** Only receives the entry (step 1); returns the new inbox row, or empty for a repeated message. */
     public Optional<UUID> receive(JsonNode entry) {
-        return transaction.execute(status -> inbox.receive(entry, InboxSource.FEED));
+        return receive(entry, InboxSource.FEED);
+    }
+
+    /** Receives the entry as if it came from {@code source}. */
+    public Optional<UUID> receive(JsonNode entry, InboxSource source) {
+        return transaction.execute(status -> inbox.receive(entry, source));
     }
 
     public String status(UUID inboxId) {
