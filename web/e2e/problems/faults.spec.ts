@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { signInViaApi } from '../auth/helpers';
 import { createRequestViaApi, uniqueCargo } from '../requests/helpers';
-import { allFaultsOff, requireCarrier, setFaults } from './carrier';
+import { allFaultsOff, requireCarrier, setFaults, waitForReceipt } from './carrier';
 
 // Problems from real emulator faults (web-problems.md §10.4). The switches are global, so this file runs in the
 // `faults` project: after every other test, one test at a time, every switch off before and after each test.
@@ -89,10 +89,15 @@ test('a broken carrier record is found in the problems list and acknowledged in 
 });
 
 test('a lost answer shows «unknown whether received» in the card until the system closes it', async ({ page }) => {
-  test.setTimeout(SYSTEM_TIMEOUT + 30_000);
-  // A lost answer alone is not enough: the result comes by the feed before the send times out.
-  await setFaults({ loseResponse: true, delayed: true });
+  test.setTimeout(2 * SYSTEM_TIMEOUT);
+  // The answer to the first send is lost. Once the carrier has that send, it becomes unavailable: the resends get
+  // 503 and the feed is closed, so «unknown whether received» stays open long enough to be seen (with the carrier
+  // reachable the resend confirms receipt within ~5 s — less than the card's refresh interval).
+  await setFaults({ loseResponse: true });
   const request = await createRequestViaApi(page, 'north.initiator', { cargoDescription: uniqueCargo('Проблемы потеря') });
+  const card = (await (await page.request.get(`/api/requests/${request.id}`)).json()) as { operationId: string };
+  await waitForReceipt(card.operationId);
+  await setFaults({ loseResponse: true, unavailable: true });
   await signInViaApi(page, 'north.operator');
 
   await page.goto(`/requests/${request.id}`);

@@ -24,6 +24,23 @@ export function allFaultsOff(): Promise<void> {
   return setFaults({});
 }
 
+/** Waits until the emulator has received the operation (`GET /admin/operations?operationId=`). */
+export async function waitForReceipt(operationId: string, timeoutMs = 30_000): Promise<void> {
+  const carrier = await playwrightRequest.newContext({ baseURL: CARRIER_BASE_URL });
+  try {
+    const until = Date.now() + timeoutMs;
+    while (Date.now() < until) {
+      const response = await carrier.get('/admin/operations', { params: { operationId } });
+      const body = (await response.json()) as { items: unknown[] };
+      if (body.items.length > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    throw new Error(`the carrier did not receive operation ${operationId} in ${timeoutMs} ms`);
+  } finally {
+    await carrier.dispose();
+  }
+}
+
 /** Skips the test, with the reason, when the emulator cannot be reached (no stand running). */
 export async function requireCarrier(): Promise<void> {
   const carrier = await playwrightRequest.newContext({ baseURL: CARRIER_BASE_URL });
