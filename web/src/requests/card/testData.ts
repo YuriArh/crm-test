@@ -63,9 +63,10 @@ export function rejectedCard(overrides: Partial<RequestCard> = {}): RequestCard 
   });
 }
 
-/** The operator's view: the same card with the exchange block. */
+/** The operator's view: the same card with the exchange block and its problems (none unless given). */
 export function withExchange(card: RequestCard): RequestCard {
   return {
+    problems: [],
     ...card,
     exchange: {
       attempts: 2,

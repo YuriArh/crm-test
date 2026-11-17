@@ -11,8 +11,20 @@ export function isFinalCard(card: RequestCard): boolean {
   return isFinalBusiness(card.businessStatus) && isFinalDelivery(card.deliveryStatus);
 }
 
+/** An open problem may still change a final card: a retry runs, the system closes what it can (operators only). */
+export function hasOpenProblem(card: RequestCard): boolean {
+  return card.problems?.some((problem) => problem.status === 'OPEN') ?? false;
+}
+
+/** How often the card is asked again: every 5 s until it is final and has no open problem (web-problems.md §7.3). */
+export function cardRefreshInterval(card: RequestCard | undefined, error: unknown): number | false {
+  // A request that has left the caller's scope (404) will not come back by asking again.
+  if (card === undefined || isCardGone(error)) return false;
+  return isFinalCard(card) && !hasOpenProblem(card) ? false : CARD_REFRESH_MS;
+}
+
 /**
- * The request card. While it is not final it is asked again every 5 s, only while the tab is visible
+ * The request card. It is asked again by {@link cardRefreshInterval}, only while the tab is visible
  * (TanStack Query pauses intervals of hidden tabs). The draft of an edit lives apart from this data.
  */
 export function requestCardQueryOptions(id: string) {
@@ -21,12 +33,7 @@ export function requestCardQueryOptions(id: string) {
     queryFn: () => unwrap(api.GET('/api/requests/{id}', { params: { path: { id } } })),
     // The loader has just fetched it; mounting the page must not ask again at once.
     staleTime: 1_000,
-    refetchInterval: (query) => {
-      const card = query.state.data;
-      // A request that has left the caller's scope (404) will not come back by asking again.
-      if (card === undefined || isFinalCard(card) || isCardGone(query.state.error)) return false;
-      return CARD_REFRESH_MS;
-    },
+    refetchInterval: (query) => cardRefreshInterval(query.state.data, query.state.error),
     refetchIntervalInBackground: false,
   });
 }
