@@ -2,6 +2,7 @@ package com.acme.dispatch.problem;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import com.acme.dispatch.config.IdGenerator;
@@ -69,6 +70,26 @@ public class ProblemService {
         String details = reason == null || reason.isBlank() ? "Record is " + outcome : reason;
         if (problems.open(ids.newId(), kind.get(), requestId, inboxId, details, now)) {
             log.warn("Problem {} opened for record {} of request {}: {}", kind.get(), inboxId, requestId, details);
+        }
+    }
+
+    /**
+     * The carrier showed that it knows the operation (a reconciliation answer or an applied result): an open
+     * {@code EXTERNAL_MISSING} is no longer true. Not tied to a delivery transition — the problem exists only while
+     * delivery is already {@code ACKNOWLEDGED}, so no transition happens ({@code reconciliation.md} §2.5).
+     */
+    public void onCarrierKnowsOperation(UUID requestId, UUID operationId, Instant now) {
+        if (problems.closeBySystem(requestId, Set.of(ProblemKind.EXTERNAL_MISSING), now) > 0) {
+            log.info("Closed EXTERNAL_MISSING of request {} (operation {}): the carrier knows the operation",
+                    requestId, operationId);
+        }
+    }
+
+    /** Reconciliation: the carrier does not know an operation it acknowledged. Opens the problem unless it is open. */
+    public void onExternalMissing(UUID requestId, UUID operationId, String details, Instant now) {
+        if (problems.open(ids.newId(), ProblemKind.EXTERNAL_MISSING, requestId, null, details, now)) {
+            log.warn("Problem EXTERNAL_MISSING opened for request {} (operation {}): {}", requestId, operationId,
+                    details);
         }
     }
 

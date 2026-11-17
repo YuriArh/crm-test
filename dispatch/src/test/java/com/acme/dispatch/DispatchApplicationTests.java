@@ -1,6 +1,7 @@
 package com.acme.dispatch;
 
 import static com.acme.dispatch.support.DemoData.NORTH_INITIATOR_LOGIN;
+import static com.acme.dispatch.support.TestClockConfiguration.START;
 import static com.acme.dispatch.support.TestSecurity.asUser;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -14,6 +15,7 @@ import java.util.UUID;
 import com.acme.dispatch.auth.AppUserRepository;
 import com.acme.dispatch.support.Contract;
 import com.acme.dispatch.support.IntegrationTest;
+import com.acme.dispatch.support.MutableClock;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +29,8 @@ class DispatchApplicationTests {
     MockMvc mockMvc;
     @Autowired
     AppUserRepository users;
+    @Autowired
+    MutableClock clock;
 
     @Test
     void healthIsUp() throws Exception {
@@ -37,6 +41,8 @@ class DispatchApplicationTests {
 
     @Test
     void systemInfoExposesBusinessTimezone() throws Exception {
+        clock.set(START);   // the context is shared: another class may have moved the clock
+
         mockMvc.perform(get("/api/system/info"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.application").value("dispatch"))

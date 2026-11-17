@@ -51,7 +51,8 @@ class RetryPolicyTest {
     @Test
     void sendingAndProcessingPoliciesComeFromTheirSettings() {
         ExchangeProperties properties = new ExchangeProperties(true, 20, Duration.ofSeconds(60), INITIAL, MAX, 8, 100,
-                Duration.ofSeconds(30), 5, Duration.ofSeconds(1), Duration.ofMinutes(1));
+                Duration.ofSeconds(30), 5, Duration.ofSeconds(1), Duration.ofMinutes(1), Duration.ofMinutes(1),
+                Duration.ofMinutes(2), Duration.ofMinutes(5), Duration.ofHours(1), 100);
 
         RetryPolicy processing = RetryPolicy.forInboxProcessing(properties);
         assertThat(processing.backoff(1)).isEqualTo(Duration.ofSeconds(1));
