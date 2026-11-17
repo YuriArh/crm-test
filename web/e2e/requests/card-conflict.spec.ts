@@ -30,7 +30,8 @@ test('two users edit the comment at once: the second one chooses, nothing is los
       if (await save.isEnabled()) await save.click();
       await expect(note).toBeVisible({ timeout: 1_000 });
     }).toPass({ timeout: 15_000 });
-    await expect(initiator.getByText(operatorText)).toBeVisible();
+    // In the comment's own section: the history below shows the operator's edit too.
+    await expect(initiator.getByRole('region', { name: 'Комментарий' }).getByText(operatorText)).toBeVisible();
     await expect(initiator.getByRole('textbox', { name: 'Комментарий' })).toHaveValue(initiatorText);
 
     await initiator.getByRole('button', { name: 'Оставить моё' }).click();
