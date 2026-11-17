@@ -29,6 +29,7 @@ import com.acme.dispatch.request.RequestCard;
 import com.acme.dispatch.support.IntegrationTest;
 import com.acme.dispatch.support.MutableClock;
 import com.acme.dispatch.support.OurSide;
+import com.acme.dispatch.support.TestEvents;
 import com.acme.dispatch.support.TestRequests;
 import com.acme.dispatch.support.TestResults;
 import com.acme.dispatch.support.TestRows;
@@ -115,6 +116,18 @@ class ResolveProblemTests {
         assertThat(results.status(conflict.record())).as("the outcome of processing is history").isEqualTo("CONFLICT");
         assertThat(OurSide.of(jdbc, conflict.problem())).as("our result before the decision")
                 .isEqualTo("SUCCEEDED/TRK-00000001/325.00/-");
+    }
+
+    @Test
+    void applyCarrierIsRecorded() throws Exception {
+        Conflict conflict = conflict();
+
+        resolve(conflict.problem(), "APPLY_CARRIER", "Confirmed", "k-1").andExpect(status().isOk());
+
+        assertThat(TestEvents.of(jdbc, conflict.request().id())).last().isEqualTo("RESULT_CHANGED v2 by "
+                + NORTH_OPERATOR + " [trackingNumber: TRK-00000001 → TRK-00000002, price: 325 → 400]");
+        assertThat(TestEvents.links(jdbc, conflict.request().id())).last()
+                .isEqualTo(conflict.record() + "/" + conflict.problem());
     }
 
     @Test

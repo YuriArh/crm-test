@@ -9,6 +9,7 @@ import { CardHeader } from './CardHeader';
 import { ContentSection } from './ContentSection';
 import { AssigneeField, CommentField, SaveActions } from './EditableFields';
 import { ExchangePanel } from './ExchangePanel';
+import { RequestHistory } from './history/RequestHistory';
 import { LeaveGuard } from './LeaveGuard';
 import { PropertiesPanel } from './PropertiesPanel';
 import { ReconcileAction } from './ReconcileAction';
@@ -57,6 +58,7 @@ export function RequestCardPage({ id }: { id: string }) {
       assignee={me.role === 'OPERATOR' ? <AssigneeField card={card} editor={editor} /> : undefined}
     />
   );
+  const history = <RequestHistory card={card} />;
   const exchange = card.exchange ? (
     <ExchangePanel
       card={card}
@@ -83,6 +85,7 @@ export function RequestCardPage({ id }: { id: string }) {
           <Panel>{properties}</Panel>
           {comment}
           {exchange && <Panel>{exchange}</Panel>}
+          {history}
           <SaveActions editor={editor} variant="bar" />
         </Stack>
       ) : (
@@ -98,6 +101,7 @@ export function RequestCardPage({ id }: { id: string }) {
                   {comment}
                   <SaveActions editor={editor} variant="inline" />
                 </Stack>
+                {history}
               </Stack>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 4, lg: 3 }}>

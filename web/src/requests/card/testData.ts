@@ -1,6 +1,6 @@
 // Fixtures of the card's component tests (imported by *.test.tsx only).
 import { http, HttpResponse } from 'msw';
-import type { Me, Reconciliation, RequestCard, UserSummary } from '@/shared/api';
+import type { HistoryPage, Me, Reconciliation, RequestCard, UserSummary } from '@/shared/api';
 import { demoInitiator, server } from '@/test/server';
 
 export const CARD_ID ='0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60';
@@ -84,14 +84,21 @@ export function withExchange(card: RequestCard): RequestCard {
 }
 
 /**
- * Serves `GET /api/requests/{id}` (the card returned by `next()`, so tests can change it between calls)
- * and the system info; returns a counter of card requests.
+ * Serves `GET /api/requests/{id}` (the card returned by `next()`, so tests can change it between calls),
+ * the system info and the card's history (only its creation unless a test serves another, see
+ * `history/fixtures.ts`); returns a counter of card requests.
  */
 export function serveCard(next: RequestCard | (() => RequestCard)) {
   const calls = { count: 0 };
   server.use(
     http.get('*/api/system/info', () =>
       HttpResponse.json({ application: 'dispatch', serverTime: '2026-11-14T12:00:00Z', businessTimezone: 'Europe/Moscow' }),
+    ),
+    http.get(`*/api/requests/${CARD_ID}/history`, () =>
+      HttpResponse.json({
+        items: [{ id: CARD_ID, kind: 'CREATED', at: '2026-11-12T09:15:03Z', actor: { id: demoInitiator.id, displayName: 'Инициатор (Север)' } }],
+        nextCursor: null,
+      } satisfies HistoryPage),
     ),
     http.get(`*/api/requests/${CARD_ID}`, () => {
       calls.count += 1;

@@ -8,7 +8,12 @@ import com.acme.dispatch.auth.CurrentUser;
 import com.acme.dispatch.common.BusinessCalendar;
 import com.acme.dispatch.common.web.ApiException;
 import com.acme.dispatch.common.web.ErrorCode;
+import com.acme.dispatch.config.IdGenerator;
 import com.acme.dispatch.exchange.SendQueueDao;
+import com.acme.dispatch.history.Changes;
+import com.acme.dispatch.history.RequestEvent;
+import com.acme.dispatch.history.RequestEventDao;
+import com.acme.dispatch.history.RequestEventKind;
 import com.acme.dispatch.exchange.inbox.OperatorResults;
 import com.acme.dispatch.exchange.reconcile.Reconciler;
 import com.acme.dispatch.exchange.reconcile.ReconciliationQueryDao;
@@ -49,10 +54,15 @@ public class OperatorActions {
     private final BusinessCalendar calendar;
     private final Reconciler reconciler;
     private final ReconciliationQueryDao reconciliations;
+    private final RequestEventDao events;
+    private final IdGenerator ids;
 
     public OperatorActions(RequestQueryService cards, SendQueueDao queue, ProblemDao problems,
                            ProblemQueryDao problemQueries, OperatorResults results, IdempotencyService idempotency,
-                           BusinessCalendar calendar, Reconciler reconciler, ReconciliationQueryDao reconciliations) {
+                           BusinessCalendar calendar, Reconciler reconciler, ReconciliationQueryDao reconciliations,
+                           RequestEventDao events, IdGenerator ids) {
+        this.events = events;
+        this.ids = ids;
         this.cards = cards;
         this.queue = queue;
         this.problems = problems;
@@ -87,7 +97,7 @@ public class OperatorActions {
                     }
                     Instant now = calendar.now();
                     if (body.decision() == ProblemDecision.APPLY_CARRIER) {
-                        applyCarrier(problem, now);
+                        applyCarrier(problem, user.id(), now);
                     }
                     if (!problems.closeById(problemId, body.decision(), user.id(), body.comment(), now)) {
                         throw invalidDecision(problem, body.decision());
@@ -124,16 +134,16 @@ public class OperatorActions {
      * carrier's answer a reconciliation conflict shows now — which may have changed since the operator saw it, so a
      * missing final result there is {@code 409}.
      */
-    private void applyCarrier(ExchangeProblem problem, Instant now) {
+    private void applyCarrier(ExchangeProblem problem, UUID operatorId, Instant now) {
         if (problem.kind() == ProblemKind.RECONCILIATION_CONFLICT) {
             String answer = problems.carrierAnswerOf(problem.id()).orElse(null);
             if (answer == null || !results.applyCarrierAnswer(answer,
-                    "Applied by operator decision " + problem.id(), now)) {
+                    "Applied by operator decision " + problem.id(), operatorId, problem.id(), now)) {
                 throw invalidDecision(problem, ProblemDecision.APPLY_CARRIER);
             }
             return;
         }
-        results.applyChosen(problems.recordOf(problem.id()).orElseThrow(), now);
+        results.applyChosen(problems.recordOf(problem.id()).orElseThrow(), operatorId, problem.id(), now);
     }
 
     private static ApiException invalidDecision(ExchangeProblem problem, ProblemDecision decision) {
@@ -154,11 +164,13 @@ public class OperatorActions {
         return idempotency.execute(user.id(), idempotencyKey, RETRY_OPERATION, Map.of("requestId", requestId),
                 RequestCard.class, () -> {
                     Instant now = calendar.now();
-                    if (!queue.retryByOperator(requestId, now)) {
-                        throw new ApiException(ErrorCode.INVALID_STATE, "Delivery of request " + card.number()
-                                + " is " + card.deliveryStatus() + "; only FAILED or UNKNOWN can be retried, or an "
-                                + "acknowledged one the carrier lost while it has no result");
-                    }
+                    SendQueueDao.Retried retried = queue.retryByOperator(requestId, now).orElseThrow(() ->
+                            new ApiException(ErrorCode.INVALID_STATE, "Delivery of request " + card.number()
+                                    + " is " + card.deliveryStatus() + "; only FAILED or UNKNOWN can be retried, or "
+                                    + "an acknowledged one the carrier lost while it has no result"));
+                    events.insert(new RequestEvent(ids.newId(), requestId, null, now, user.id(),
+                            RequestEventKind.DELIVERY_RETRIED,
+                            new Changes().always("deliveryStatus", retried.from(), retried.to()).list(), null, null));
                     problems.closeByOperator(requestId, ProblemKind.DELIVERY_FAILED, ProblemDecision.RETRIED,
                             user.id(), null, now);
                     problems.closeByOperator(requestId, ProblemKind.EXTERNAL_MISSING, ProblemDecision.RETRIED,

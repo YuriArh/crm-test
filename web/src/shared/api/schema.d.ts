@@ -230,6 +230,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/requests/{id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Request id. A malformed id answers `404`, like a missing request. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * History of a request
+         * @description One feed of the request's changes and its exchange with the carrier, newest first. Whoever sees the
+         *     request sees its history: an operator of its service sees everything, its initiator sees the business
+         *     part only (`CREATED`, `EDITED`, `RESULT_CHANGED`, `DELIVERY_ACKNOWLEDGED`) without links to carrier records
+         *     and problems. Entries of one instant follow cause (an attempt before the acknowledgement it brought, a
+         *     result before its problem). An entry is identified by `kind` and `id` together.
+         */
+        get: operations["getRequestHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/problems": {
         parameters: {
             query?: never;
@@ -648,6 +675,191 @@ export interface components {
             messageId: string;
             /** Format: date-time */
             occurredAt: string;
+        };
+        HistoryPage: {
+            items: components["schemas"]["HistoryEntry"][];
+            /** @description Pass it as `before` for the next (older) page; `null` on the last page. */
+            nextCursor: string | null;
+        };
+        /**
+         * @description `CREATED` — the request was created; `EDITED` — its comment or assignee changed; `RESULT_CHANGED` — its
+         *     result changed (from the carrier, or the carrier's version an operator applied); `DELIVERY_ACKNOWLEDGED` —
+         *     the carrier confirmed receipt; `DELIVERY_RETRIED` — an operator retried the delivery; `SEND_ATTEMPT` — an
+         *     attempt to send; `RESULT_RECEIVED` — a carrier record and how it was processed; `RECONCILIATION` — a
+         *     reconciliation check; `PROBLEM_OPENED`, `PROBLEM_RESOLVED` — a problem of the exchange and its decision.
+         * @enum {string}
+         */
+        HistoryKind: "CREATED" | "EDITED" | "RESULT_CHANGED" | "DELIVERY_ACKNOWLEDGED" | "DELIVERY_RETRIED" | "SEND_ATTEMPT" | "RESULT_RECEIVED" | "RECONCILIATION" | "PROBLEM_OPENED" | "PROBLEM_RESOLVED";
+        /** @description One entry; the fields after `actor` depend on `kind` (each variant fixes its `kind`). */
+        HistoryEntry: components["schemas"]["HistoryCreated"] | components["schemas"]["HistoryEdited"] | components["schemas"]["HistoryResultChanged"] | components["schemas"]["HistoryDeliveryAcknowledged"] | components["schemas"]["HistoryDeliveryRetried"] | components["schemas"]["HistorySendAttempt"] | components["schemas"]["HistoryResultReceived"] | components["schemas"]["HistoryReconciliation"] | components["schemas"]["HistoryProblemOpened"] | components["schemas"]["HistoryProblemResolved"];
+        /**
+         * Format: uuid
+         * @description The id of what the entry is about: the request (`CREATED`), the event (`EDITED`, `RESULT_CHANGED`,
+         *     `DELIVERY_RETRIED`), the operation (`DELIVERY_ACKNOWLEDGED`), the attempt, the carrier record, the check,
+         *     the problem. Unique together with `kind`.
+         */
+        HistoryEntryId: string;
+        /** @description Who did it; `null` — the system. */
+        HistoryActor: components["schemas"]["PersonRef"] | null;
+        HistoryCreated: {
+            id: components["schemas"]["HistoryEntryId"];
+            /** @constant */
+            kind: "CREATED";
+            /** Format: date-time */
+            at: string;
+            actor: components["schemas"]["HistoryActor"];
+        };
+        HistoryEdited: {
+            id: components["schemas"]["HistoryEntryId"];
+            /** @constant */
+            kind: "EDITED";
+            /** Format: date-time */
+            at: string;
+            actor: components["schemas"]["HistoryActor"];
+            /**
+             * Format: int64
+             * @description The version of the request this change made.
+             */
+            version: number;
+            changes: components["schemas"]["FieldChange"][];
+        };
+        HistoryResultChanged: {
+            id: components["schemas"]["HistoryEntryId"];
+            /** @constant */
+            kind: "RESULT_CHANGED";
+            /** Format: date-time */
+            at: string;
+            actor: components["schemas"]["HistoryActor"];
+            /** Format: int64 */
+            version: number;
+            changes: components["schemas"]["FieldChange"][];
+            /**
+             * Format: uuid
+             * @description The carrier record whose result was applied; `null` for an initiator.
+             */
+            recordId: string | null;
+            /**
+             * Format: uuid
+             * @description The problem an operator applied it in; `null` otherwise and for an initiator.
+             */
+            problemId: string | null;
+        };
+        HistoryDeliveryAcknowledged: {
+            id: components["schemas"]["HistoryEntryId"];
+            /** @constant */
+            kind: "DELIVERY_ACKNOWLEDGED";
+            /** Format: date-time */
+            at: string;
+            actor: components["schemas"]["HistoryActor"];
+            /** @description How receipt became known; `null` for an initiator. */
+            via: ("RESPONSE" | "RESULT" | "RECONCILIATION") | null;
+        };
+        HistoryDeliveryRetried: {
+            id: components["schemas"]["HistoryEntryId"];
+            /** @constant */
+            kind: "DELIVERY_RETRIED";
+            /** Format: date-time */
+            at: string;
+            actor: components["schemas"]["HistoryActor"];
+            /** @description The delivery status the retry found and left (`UNKNOWN` stays `UNKNOWN`). */
+            changes: components["schemas"]["FieldChange"][];
+        };
+        HistorySendAttempt: {
+            id: components["schemas"]["HistoryEntryId"];
+            /** @constant */
+            kind: "SEND_ATTEMPT";
+            /** Format: date-time */
+            at: string;
+            actor: components["schemas"]["HistoryActor"];
+            attemptNo: number;
+            /** @description `null` while the attempt is in progress. */
+            outcome: ("ACKNOWLEDGED" | "TEMPORARY_ERROR" | "UNKNOWN" | "PERMANENT_ERROR" | "PAYLOAD_CONFLICT") | null;
+            httpStatus: number | null;
+            error: string | null;
+            durationMs: number | null;
+            /** Format: date-time */
+            finishedAt: string | null;
+        };
+        HistoryResultReceived: {
+            id: components["schemas"]["HistoryEntryId"];
+            /** @constant */
+            kind: "RESULT_RECEIVED";
+            /**
+             * Format: date-time
+             * @description When it was processed (when it was received, for records older than the history).
+             */
+            at: string;
+            actor: components["schemas"]["HistoryActor"];
+            /** Format: uuid */
+            recordId: string;
+            /** @enum {string} */
+            source: "FEED" | "RECONCILIATION";
+            /** @description The record's result status, `null` when it could not be read. */
+            resultStatus: string | null;
+            sequence: number | null;
+            /** @enum {string} */
+            processingStatus: "RECEIVED" | "APPLIED" | "STALE" | "CONFLICT" | "INVALID" | "FAILED";
+            reason: string | null;
+            /** @description How many times the same message came again (no effect). */
+            duplicates: number;
+            /** Format: date-time */
+            lastDuplicateAt: string | null;
+            /** Format: date-time */
+            receivedAt: string;
+        };
+        HistoryReconciliation: {
+            id: components["schemas"]["HistoryEntryId"];
+            /** @constant */
+            kind: "RECONCILIATION";
+            /** Format: date-time */
+            at: string;
+            actor: components["schemas"]["HistoryActor"];
+            /** @enum {string} */
+            trigger: "STARTUP" | "SCHEDULED" | "MANUAL";
+            /** @enum {string} */
+            outcome: "MATCH" | "EXTERNAL_AHEAD" | "EXTERNAL_MISSING" | "CONFLICT" | "ERROR";
+            details: string;
+        };
+        HistoryProblemOpened: {
+            id: components["schemas"]["HistoryEntryId"];
+            /** @constant */
+            kind: "PROBLEM_OPENED";
+            /** Format: date-time */
+            at: string;
+            actor: components["schemas"]["HistoryActor"];
+            /** Format: uuid */
+            problemId: string;
+            problemKind: components["schemas"]["ProblemKind"];
+        };
+        HistoryProblemResolved: {
+            id: components["schemas"]["HistoryEntryId"];
+            /** @constant */
+            kind: "PROBLEM_RESOLVED";
+            /** Format: date-time */
+            at: string;
+            actor: components["schemas"]["HistoryActor"];
+            /** Format: uuid */
+            problemId: string;
+            problemKind: components["schemas"]["ProblemKind"];
+            decision: components["schemas"]["ProblemDecision"];
+            comment: string | null;
+        };
+        /** @description One field of a change, before and after. */
+        FieldChange: components["schemas"]["ValueChange"] | components["schemas"]["AssigneeChange"];
+        ValueChange: {
+            /**
+             * @description `price` is a decimal number written as text, without trailing zeros.
+             * @enum {string}
+             */
+            field: "comment" | "businessStatus" | "trackingNumber" | "price" | "rejectionReason" | "deliveryStatus";
+            from: string | null;
+            to: string | null;
+        };
+        AssigneeChange: {
+            /** @enum {string} */
+            field: "assignee";
+            from: components["schemas"]["PersonRef"] | null;
+            to: components["schemas"]["PersonRef"] | null;
         };
         ExchangeProblemPage: {
             items: components["schemas"]["ExchangeProblem"][];
@@ -1120,6 +1332,36 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+        };
+    };
+    getRequestHistory: {
+        parameters: {
+            query?: {
+                /** @description `nextCursor` of the previous page; the newest entries when omitted. */
+                before?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Request id. A malformed id answers `404`, like a missing request. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of the history. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryPage"];
+                };
+            };
+            400: components["responses"]["ValidationFailed"];
+            401: components["responses"]["Unauthenticated"];
+            404: components["responses"]["NotFound"];
         };
     };
     listProblems: {

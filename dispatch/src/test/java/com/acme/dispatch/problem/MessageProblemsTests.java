@@ -101,7 +101,7 @@ class MessageProblemsTests {
     @Test
     void failedRecordOpensMessageFailed() {
         RequestCard request = requests.create("1");
-        doThrow(new IllegalStateException("simulated bug")).when(inboxDao).applyToRequest(any(), any(), any());
+        doThrow(new IllegalStateException("simulated bug")).when(inboxDao).applyToRequest(any(), any(), any(), any());
         UUID record = results.receive(inProgress(1, request.operationId())).orElseThrow();
 
         for (int pass = 1; pass <= 5; pass++) {
