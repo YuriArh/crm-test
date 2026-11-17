@@ -1,4 +1,4 @@
-import { Button, Group, SegmentedControl, Stack, Text, Timeline, Title } from '@mantine/core';
+import { Anchor, Box, Button, Group, SegmentedControl, Stack, Text, Timeline, Title } from '@mantine/core';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useCurrentUser } from '@/auth';
@@ -108,7 +108,7 @@ function Entry({ entry, timeZone }: { entry: HistoryEntry; timeZone: string }) {
   return (
     <Timeline.Item
       role="listitem"
-      color={view.color}
+      bullet={<Box w="100%" h="100%" style={{ borderRadius: '50%', background: `var(--mantine-color-${view.color}-filled)` }} />}
       title={
         <Title order={4} size="sm" fw={590} style={{ overflowWrap: 'anywhere' }}>
           {view.title}
@@ -137,16 +137,17 @@ function Entry({ entry, timeZone }: { entry: HistoryEntry; timeZone: string }) {
         ))}
         {view.details.length > 0 && (
           <>
-            <Button
-              variant="subtle"
-              size="compact-xs"
+            <Anchor
+              component="button"
+              type="button"
+              size="xs"
               aria-expanded={open}
               aria-controls={detailsId}
               onClick={() => setOpen((value) => !value)}
               style={{ alignSelf: 'flex-start' }}
             >
               Подробнее
-            </Button>
+            </Anchor>
             {open && (
               <Stack gap={2} id={detailsId}>
                 {view.details.map((line) => (
