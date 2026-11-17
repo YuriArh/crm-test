@@ -45,6 +45,23 @@ describe('problem panel', () => {
     expect(await within(panel).findByRole('region', { name: 'Сообщение перевозчика' })).toBeInTheDocument();
   });
 
+  it('opens from the keyboard: Tab to the row, Enter; the decision dialog starts in the comment', async () => {
+    const user = userEvent.setup();
+    serve(() => HttpResponse.json(record));
+    const { router } = renderApp('/problems', { me: demoOperator });
+
+    const table = await screen.findByRole('table');
+    within(table).getAllByRole('link', { name: 'Некорректное сообщение перевозчика' })[0]!.focus();
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(router.state.location.pathname).toBe(`/problems/${record.id}`));
+
+    const panel = await screen.findByRole('dialog', { name: 'Некорректное сообщение перевозчика' });
+    within(panel).getByRole('button', { name: 'Разобрано' }).focus();
+    await user.keyboard('{Enter}');
+    const dialog = await screen.findByRole('dialog', { name: 'Разобрано' });
+    await waitFor(() => expect(within(dialog).getByRole('textbox', { name: 'Комментарий' })).toHaveFocus());
+  });
+
   it('opens by a link to a problem that is not on the current page', async () => {
     const elsewhere = deliveryFailed({ details: 'HTTP 422' });
     serve(() => HttpResponse.json(elsewhere));
