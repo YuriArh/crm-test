@@ -3,6 +3,7 @@ import { useMediaQuery } from '@mantine/hooks';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { useCurrentUser } from '@/auth';
+import { ProblemsBlock, useDecisionDialog } from '@/problems';
 import { isCardGone, requestCardQueryOptions } from './api';
 import { CardHeader } from './CardHeader';
 import { ContentSection } from './ContentSection';
@@ -12,6 +13,10 @@ import { LeaveGuard } from './LeaveGuard';
 import { PropertiesPanel } from './PropertiesPanel';
 import { RequestNotFound } from './RequestNotFound';
 import { ResultSection } from './ResultSection';
+import { RetryAction } from './RetryAction';
+
+/** Problems of the delivery itself: their notice offers «Повторить отправку» when the card allows it. */
+const DELIVERY_KINDS = new Set<string>(['DELIVERY_UNKNOWN', 'DELIVERY_FAILED']);
 import { useCardEditor } from './useCardEditor';
 
 /**
@@ -27,10 +32,18 @@ export function RequestCardPage({ id }: { id: string }) {
   });
   const { data: card, error } = useSuspenseQuery(requestCardQueryOptions(id));
   const editor = useCardEditor(card);
+  const decisions = useDecisionDialog();
 
   if (isCardGone(error)) return <RequestNotFound />;
 
   const header = <CardHeader card={card} />;
+  const problems = card.problems?.length ? (
+    <ProblemsBlock
+      problems={card.problems}
+      onDecide={decisions.open}
+      actionsFor={(problem) => (DELIVERY_KINDS.has(problem.kind) ? <RetryAction card={card} /> : null)}
+    />
+  ) : null;
   const content = <ContentSection card={card} />;
   const result = <ResultSection card={card} />;
   const comment = <CommentField card={card} editor={editor} />;
@@ -40,14 +53,18 @@ export function RequestCardPage({ id }: { id: string }) {
       assignee={me.role === 'OPERATOR' ? <AssigneeField card={card} editor={editor} /> : undefined}
     />
   );
-  const exchange = card.exchange ? <ExchangePanel card={card} exchange={card.exchange} /> : null;
+  const exchange = card.exchange ? (
+    <ExchangePanel card={card} exchange={card.exchange} actions={<RetryAction card={card} />} />
+  ) : null;
 
   return (
     <Container size="lg" px={0}>
       <LeaveGuard dirty={editor.dirty} />
+      {decisions.dialog}
       {phone ? (
         <Stack gap="xl">
           {header}
+          {problems}
           {content}
           {result}
           <Panel>{properties}</Panel>
@@ -61,6 +78,7 @@ export function RequestCardPage({ id }: { id: string }) {
           <Grid gap="xl">
             <Grid.Col span={{ base: 12, sm: 8, lg: 9 }}>
               <Stack gap="xl">
+                {problems}
                 {content}
                 {result}
                 <Stack gap="sm">

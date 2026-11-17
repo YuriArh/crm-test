@@ -84,6 +84,13 @@ class ProblemsE2ETest {
         assertThat(problem.get("actions").get(0).asString()).isEqualTo("ACKNOWLEDGED");
         String problemId = problem.get("id").asString();
 
+        E2eClient.Response one = operator.get("/api/problems/" + problemId);
+        assertThat(one.status()).isEqualTo(200);
+        assertThat(one.body()).as("one problem is its item of the list").isEqualTo(problem);
+        JsonNode row = registryRow(id, "&hasOpenProblems=true");
+        assertThat(row).as("among the requests with open problems").isNotNull();
+        assertThat(row.get("openProblems").asInt()).isEqualTo(1);
+
         E2eClient.Response resolved = operator.post("/api/problems/" + problemId + "/resolve",
                 Map.of("decision", "ACKNOWLEDGED", "comment", "Сообщил перевозчику о битой цене"),
                 idempotencyKey(newKey()));
@@ -91,6 +98,8 @@ class ProblemsE2ETest {
         assertThat(resolved.body().get("status").asString()).isEqualTo("RESOLVED");
         assertThat(resolved.body().get("resolvedBy").get("displayName").asString()).isEqualTo("Оператор (Север)");
         assertThat(invalidMessageOf(id)).as("no longer among the open ones").isNull();
+        assertThat(registryRow(id, "&hasOpenProblems=true")).as("no longer among requests with problems").isNull();
+        assertThat(registryRow(id, "").get("openProblems").asInt()).isZero();
     }
 
     @Test
@@ -106,6 +115,24 @@ class ProblemsE2ETest {
         JsonNode card = initiator.get("/api/requests/" + id).body();
         assertThat(card.has("problems")).isFalse();
         assertThat(card.get("actions").size()).isZero();
+        assertThat(initiator.get("/api/problems/" + UUID.randomUUID()).status()).isEqualTo(403);
+        assertThat(initiator.get("/api/requests?hasOpenProblems=true").status()).isEqualTo(403);
+        JsonNode rows = initiator.get("/api/requests?size=100").body().get("items");
+        for (JsonNode row : rows) {
+            assertThat(row.get("openProblems").isNull()).as("initiators never see problem counts").isTrue();
+        }
+    }
+
+    /** The registry row of the request among the newest 100 matching {@code filter}, or {@code null}. */
+    private JsonNode registryRow(String requestId, String filter) {
+        E2eClient.Response page = operator.get("/api/requests?size=100&sort=createdAt,desc" + filter);
+        assertThat(page.status()).isEqualTo(200);
+        for (JsonNode item : page.body().get("items")) {
+            if (item.get("id").asString().equals(requestId)) {
+                return item;
+            }
+        }
+        return null;
     }
 
     /** The open INVALID_MESSAGE of the request, or {@code null}. */

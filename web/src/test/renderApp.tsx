@@ -14,6 +14,6 @@ export function renderApp(path: string, { me }: { me: Me | null }) {
   const { queryClient, router } = createApp({ history });
   queryClient.setQueryData(meKey, me);
 
-  render(<AppProviders queryClient={queryClient} router={router} />);
+  render(<AppProviders queryClient={queryClient} router={router} env="test" />);
   return { queryClient, router, history };
 }

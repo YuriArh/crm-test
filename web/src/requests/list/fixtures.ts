@@ -29,6 +29,8 @@ export function listItem(overrides: Partial<RequestListItem> = {}): RequestListI
     owner: { id: demoInitiator.id, displayName: demoInitiator.displayName },
     assignee: null,
     createdAt: '2026-11-12T09:15:00Z',
+    // As an initiator sees it; operator rows set the number of open problems.
+    openProblems: null,
     ...overrides,
   };
 }

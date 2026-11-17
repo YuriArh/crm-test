@@ -2,7 +2,7 @@ import { Group, Stack, Text } from '@mantine/core';
 import type { RequestCard } from '@/shared/api';
 import { useBusinessTimezone } from '@/shared/system';
 import { formatInstant, formatPrice } from '../format';
-import { CopyValue, Property, Section } from './parts';
+import { CopyValue, Property, Section } from '@/shared/ui/parts';
 
 /** The carrier's final answer: tracking number and price, or the reason of a rejection. */
 export function ResultSection({ card }: { card: RequestCard }) {

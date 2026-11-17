@@ -3,6 +3,7 @@ import {
   activeFilterCount,
   formatPageRange,
   parseListSearch,
+  searchForRole,
   toApiParams,
   withFilters,
   withoutFilters,
@@ -107,6 +108,27 @@ describe('activeFilterCount', () => {
 
   it('ignores the delivery filter of an initiator', () => {
     expect(activeFilterCount({ delivery: 'FAILED' }, 'INITIATOR')).toBe(0);
+  });
+});
+
+describe('the problems filter', () => {
+  it('reads problems=1 and asks operators for requests with open problems', () => {
+    expect(parseListSearch({ problems: 1 })).toEqual({ problems: 1 });
+    expect(parseListSearch({ problems: '1' })).toEqual({ problems: 1 });
+    expect(parseListSearch({ problems: 'yes' })).toEqual({});
+    expect(toApiParams({ problems: 1 }, 'OPERATOR').hasOpenProblems).toBe(true);
+  });
+
+  it('is dropped for initiators, who never see problems', () => {
+    expect(searchForRole({ problems: 1, overdue: 1 }, 'INITIATOR')).toEqual({ overdue: 1 });
+    expect(toApiParams({ problems: 1 }, 'INITIATOR').hasOpenProblems).toBeUndefined();
+    expect(activeFilterCount({ problems: 1 }, 'INITIATOR')).toBe(0);
+  });
+
+  it('counts as a filter, goes back to page 1 and is reset with the others', () => {
+    expect(activeFilterCount({ problems: 1 }, 'OPERATOR')).toBe(1);
+    expect(withFilters({ page: 3 }, { problems: 1 })).toEqual({ problems: 1 });
+    expect(withoutFilters({ problems: 1, sort: 'old' })).toEqual({ sort: 'old' });
   });
 });
 

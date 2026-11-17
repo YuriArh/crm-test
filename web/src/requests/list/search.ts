@@ -41,19 +41,22 @@ export type RequestListSearch = {
   delivery?: DeliveryStatus;
   /** `overdue=1`: only overdue requests. */
   overdue?: 1;
+  /** `problems=1`: only requests with an open problem (operators only). */
+  problems?: 1;
   sort?: Exclude<ListSort, 'new'>;
   /** From 1; 1 is never written. */
   page?: number;
 };
 
 /** The filters a user can change (everything but the page). */
-export type ListFilters = Pick<RequestListSearch, 'result' | 'delivery' | 'overdue'>;
+export type ListFilters = Pick<RequestListSearch, 'result' | 'delivery' | 'overdue' | 'problems'>;
 
 /** Query parameters of `GET /api/requests`. */
 export type RequestListParams = {
   businessStatus?: BusinessStatus;
   deliveryStatus?: DeliveryStatus;
   overdue?: true;
+  hasOpenProblems?: true;
   page: number;
   size: number;
   sort: string;
@@ -61,6 +64,11 @@ export type RequestListParams = {
 
 function oneOf<T extends string>(values: readonly T[], value: unknown): T | undefined {
   return typeof value === 'string' && (values as readonly string[]).includes(value) ? (value as T) : undefined;
+}
+
+/** A switch in the address: `1` (or `true`) is on; anything else is off. */
+function isOne(value: unknown): boolean {
+  return value === 1 || value === '1' || value === true || value === 'true';
 }
 
 function positiveInt(value: unknown): number | undefined {
@@ -78,7 +86,8 @@ export function parseListSearch(raw: Record<string, unknown>): RequestListSearch
   if (result) search.result = result;
   const delivery = oneOf(DELIVERY_STATUSES, raw.delivery);
   if (delivery) search.delivery = delivery;
-  if (raw.overdue === 1 || raw.overdue === '1' || raw.overdue === true || raw.overdue === 'true') search.overdue = 1;
+  if (isOne(raw.overdue)) search.overdue = 1;
+  if (isOne(raw.problems)) search.problems = 1;
   const sort = oneOf<ListSort>(SORT_OPTIONS.map((option) => option.value), raw.sort);
   if (sort !== undefined && sort !== 'new') search.sort = sort;
   const page = positiveInt(raw.page);
@@ -86,10 +95,13 @@ export function parseListSearch(raw: Record<string, unknown>): RequestListSearch
   return search;
 }
 
-/** The address as this user may use it: initiators have no delivery filter (their delivery status is simplified). */
+/**
+ * The address as this user may use it: initiators have no delivery filter (their delivery status is simplified)
+ * and no problems filter (they never see problems; dispatch answers `403` to it).
+ */
 export function searchForRole(search: RequestListSearch, role: Role): RequestListSearch {
-  if (role === 'OPERATOR' || search.delivery === undefined) return search;
-  const { delivery: _dropped, ...rest } = search;
+  if (role === 'OPERATOR' || (search.delivery === undefined && search.problems === undefined)) return search;
+  const { delivery: _delivery, problems: _problems, ...rest } = search;
   return rest;
 }
 
@@ -105,6 +117,7 @@ export function toApiParams(search: RequestListSearch, role: Role): RequestListP
   if (effective.result) params.businessStatus = effective.result;
   if (effective.delivery) params.deliveryStatus = effective.delivery;
   if (effective.overdue) params.overdue = true;
+  if (effective.problems) params.hasOpenProblems = true;
   return params;
 }
 
@@ -139,5 +152,7 @@ export function formatPageRange(page: number, size: number, total: number): stri
 /** How many filters narrow the list (for the "Фильтры · N" button and "Сбросить"). */
 export function activeFilterCount(search: RequestListSearch, role: Role): number {
   const effective = searchForRole(search, role);
-  return [effective.result, effective.delivery, effective.overdue].filter((value) => value !== undefined).length;
+  return [effective.result, effective.delivery, effective.overdue, effective.problems].filter(
+    (value) => value !== undefined,
+  ).length;
 }

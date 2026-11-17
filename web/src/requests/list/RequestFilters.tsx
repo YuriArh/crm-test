@@ -86,6 +86,14 @@ export function FilterFields({ filters, role, onChange, layout }: FieldsProps) {
         onChange={(event) => onChange({ overdue: event.currentTarget.checked ? 1 : undefined })}
         size={inline ? 'sm' : 'md'}
       />
+      {role === 'OPERATOR' && (
+        <Switch
+          label="Есть открытые проблемы"
+          checked={filters.problems === 1}
+          onChange={(event) => onChange({ problems: event.currentTarget.checked ? 1 : undefined })}
+          size={inline ? 'sm' : 'md'}
+        />
+      )}
     </>
   );
 }
@@ -114,6 +122,7 @@ function activeChips(filters: ListFilters, role: Role): { key: keyof ListFilters
     chips.push({ key: 'delivery', label: OPERATOR_DELIVERY_VIEWS[filters.delivery].label });
   }
   if (filters.overdue) chips.push({ key: 'overdue', label: 'Просроченные' });
+  if (filters.problems && role === 'OPERATOR') chips.push({ key: 'problems', label: 'С проблемами' });
   return chips;
 }
 
@@ -125,7 +134,7 @@ export function RequestFilterToolbar({ search, role, activeCount, onFilters, onR
   const [opened, setOpened] = useState(false);
   const [draft, setDraft] = useState<ListFilters>({});
   const open = () => {
-    setDraft({ result: search.result, delivery: search.delivery, overdue: search.overdue });
+    setDraft({ result: search.result, delivery: search.delivery, overdue: search.overdue, problems: search.problems });
     setOpened(true);
   };
   const chips = activeChips(search, role);
