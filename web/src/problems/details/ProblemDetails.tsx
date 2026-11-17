@@ -8,6 +8,7 @@ import { CopyValue, Property } from '@/shared/ui/parts';
 import { DECISION_ACTIONS, kindView, STATUS_VIEWS } from '../labels';
 import { CarrierMessage } from './CarrierMessage';
 import { ConflictView } from './ConflictView';
+import { OurResult } from './OurResult';
 import { ResolvedLine } from './ResolvedLine';
 
 type Props = {
@@ -22,7 +23,7 @@ type Props = {
   actions?: ReactNode;
 };
 
-const CONFLICTS = new Set<string>(['RESULT_CONFLICT']);
+const CONFLICTS = new Set<string>(['RESULT_CONFLICT', 'RECONCILIATION_CONFLICT']);
 const RECORDS = new Set<string>(['INVALID_MESSAGE', 'MESSAGE_FAILED']);
 
 /**
@@ -80,6 +81,7 @@ export function ProblemDetails({ problem, showRequest = true, showKind = true, o
 
       {CONFLICTS.has(problem.kind) && <ConflictView message={problem.message} current={problem.currentResult} />}
       {RECORDS.has(problem.kind) && problem.message && <CarrierMessage message={problem.message} />}
+      {problem.kind === 'EXTERNAL_MISSING' && <OurResult current={problem.currentResult} />}
 
       {problem.status === 'RESOLVED' && (
         <Stack gap="xs">

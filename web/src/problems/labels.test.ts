@@ -39,6 +39,12 @@ describe('problem labels', () => {
     expect(KIND_VIEWS.RECONCILIATION_CONFLICT.color).toBe('red');
   });
 
+  it('explains that a reconciliation conflict is also a result only we have (web-problems.md §4.1)', () => {
+    expect(KIND_VIEWS.RECONCILIATION_CONFLICT.hint).toBe(
+      'Итог перевозчика отличается от нашего или итог есть только у нас',
+    );
+  });
+
   it('shows a kind this client does not know by its code, in grey', () => {
     expect(kindView('SOMETHING_NEW')).toEqual({ label: 'SOMETHING_NEW', hint: '', color: 'gray' });
     expect(kindView('RESULT_CONFLICT')).toBe(KIND_VIEWS.RESULT_CONFLICT);

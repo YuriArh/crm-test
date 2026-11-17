@@ -6,9 +6,11 @@ import { renderInRouter } from '@/test/renderInRouter';
 import {
   deliveryFailed,
   deliveryUnknown,
+  externalMissing,
   invalidMessage,
   OPERATION_ID,
   orphanMessage,
+  reconciliationConflict,
   REQUEST_REF,
   resolvedByOperator,
   resolvedBySystem,
@@ -84,6 +86,53 @@ describe('ProblemDetails', () => {
     expect(within(carrier).getAllByText('Выполнена')).toHaveLength(1);
     // Tracking number and price differ, the status does not.
     expect(within(carrier).getAllByText('отличается')).toHaveLength(2);
+  });
+
+  it('shows a reconciliation conflict as a conflict: the carrier’s answer next to our result, differences marked', async () => {
+    renderInRouter(<ProblemDetails problem={reconciliationConflict()} />);
+
+    const carrier = await screen.findByRole('region', { name: 'Версия перевозчика' });
+    const ours = screen.getByRole('region', { name: 'Наш итог' });
+    expect(within(carrier).getByText('Отказ')).toBeInTheDocument();
+    expect(within(carrier).getByText('Адрес вне зоны доставки')).toBeInTheDocument();
+    expect(within(ours).getByText('TRK-00000001')).toBeInTheDocument();
+    expect(within(carrier).getAllByText('отличается').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('region', { name: 'Сообщение перевозчика' })).not.toBeInTheDocument();
+  });
+
+  it('shows a reconciliation conflict where only we have a result', async () => {
+    renderInRouter(<ProblemDetails problem={reconciliationConflict({ message: null, actions: ['KEEP_OURS'] })} />);
+
+    const carrier = await screen.findByRole('region', { name: 'Версия перевозчика' });
+    expect(within(carrier).getByText('У перевозчика итога ещё нет')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Наш итог' })).getByText('TRK-00000001')).toBeInTheDocument();
+  });
+
+  it('shows our result for a lost operation, so the operator knows whether a retry is still needed', async () => {
+    renderInRouter(
+      <ProblemDetails
+        problem={externalMissing({
+          currentResult: {
+            businessStatus: 'SUCCEEDED',
+            result: { trackingNumber: 'TRK-00000001', price: 325, rejectionReason: null, resultAt: '2026-11-17T11:00:00Z' },
+          },
+          actions: ['KEEP_OURS'],
+        })}
+      />,
+    );
+
+    const ours = await screen.findByRole('region', { name: 'Наш итог' });
+    expect(within(ours).getByText('Выполнена')).toBeInTheDocument();
+    expect(within(ours).getByText('TRK-00000001')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Версия перевозчика' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Сообщение перевозчика' })).not.toBeInTheDocument();
+  });
+
+  it('says a lost operation has no result of ours yet', async () => {
+    renderInRouter(<ProblemDetails problem={externalMissing()} />);
+
+    const ours = await screen.findByRole('region', { name: 'Наш итог' });
+    expect(within(ours).getByText('Итога нет')).toBeInTheDocument();
   });
 
   it('shows who closed a problem, how and why', async () => {
