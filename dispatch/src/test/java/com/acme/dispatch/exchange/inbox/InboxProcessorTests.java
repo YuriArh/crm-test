@@ -199,6 +199,47 @@ class InboxProcessorTests {
         }
     }
 
+    @Test
+    void appliedRecordIsRemembered() {
+        RequestCard request = requests.create("1");
+        UUID first = results.receive(inProgress(1, request.operationId())).orElseThrow();
+        processor.processDue();
+
+        assertThat(appliedRecord(request)).isEqualTo(first);
+
+        UUID second = results.receive(succeeded(2, request.operationId(), "TRK-00000001", "325.00")).orElseThrow();
+        processor.processDue();
+
+        assertThat(appliedRecord(request)).isEqualTo(second);
+    }
+
+    @Test
+    void sameSequenceIsComparedWithTheAppliedRecord() {
+        RequestCard request = requests.create("1");
+        UUID operationId = request.operationId();
+        assertThat(results.deliver(succeeded(1, operationId, "TRK-00000001", "325.00"))).isEqualTo("APPLIED");
+        UUID disputed = results.receive(succeeded(2, operationId, "TRK-00000002", "400.00")).orElseThrow();
+        processor.processDue();
+        assertThat(results.status(disputed)).isEqualTo("CONFLICT");
+        // As an operator's decision does: the disputed record is now the applied one.
+        jdbc.sql("UPDATE dispatch_operation SET applied_inbox_id = :id WHERE request_id = :request")
+                .param("id", disputed)
+                .param("request", request.id())
+                .update();
+
+        assertThat(results.deliver(succeeded(3, operationId, "TRK-00000002", "400.00")))
+                .as("the applied version again").isEqualTo("STALE");
+        assertThat(results.deliver(succeeded(4, operationId, "TRK-00000001", "325.00")))
+                .as("the version the operator did not choose").isEqualTo("CONFLICT");
+    }
+
+    private UUID appliedRecord(RequestCard request) {
+        return jdbc.sql("SELECT applied_inbox_id FROM dispatch_operation WHERE request_id = :id")
+                .param("id", request.id())
+                .query(UUID.class)
+                .single();
+    }
+
     private String businessStatus(RequestCard request) {
         return jdbc.sql("SELECT business_status FROM delivery_request WHERE id = :id")
                 .param("id", request.id()).query(String.class).single();

@@ -59,11 +59,14 @@ make ps        # состояние сервисов
 | `GET /api/users/operators` | оператору | операторы своей службы (выбор ответственного) |
 | `POST /api/requests` | инициатору | создать заявку; заголовок `Idempotency-Key` обязателен; заявка сразу ставится в очередь к перевозчику |
 | `GET /api/requests` | вошедшим | реестр: `businessStatus`, `deliveryStatus`, `overdue`, `page`, `size` (≤ 100), `sort` (`createdAt` / `deadline` / `number`, `,asc` / `,desc`) |
-| `GET /api/requests/{id}` | вошедшим | карточка заявки; оператор получает ещё блок `exchange` |
+| `GET /api/requests/{id}` | вошедшим | карточка заявки; оператор получает ещё блок `exchange`, проблемы заявки `problems` и доступные действия `actions` |
 | `PATCH /api/requests/{id}` | автору / оператору | `{version, comment?, assigneeId?}`; не переданное поле сохраняется, `null` очищает; ответственного назначает только оператор |
+| `GET /api/problems` | оператору | проблемы обмена своей службы и записи без заявки: `status` (`OPEN` по умолчанию, `RESOLVED`, `ALL`), `kind` (можно несколько), `page`, `size` |
+| `POST /api/requests/{id}/retry` | оператору | повторить отправку при доставке `FAILED` или `UNKNOWN`: новый бюджет попыток, отправка сейчас, `operationId` прежний; `Idempotency-Key` обязателен |
+| `POST /api/problems/{id}/resolve` | оператору | `{decision, comment}`: `APPLY_CARRIER` / `KEEP_OURS` для конфликта результатов, `ACKNOWLEDGED` («Разобрано») для плохой записи; комментарий обязателен; `Idempotency-Key` обязателен |
 
 - Каждый изменяющий запрос требует заголовок `X-XSRF-TOKEN` со значением cookie `XSRF-TOKEN`. После входа токен меняется, поэтому cookie нужно перечитать.
-- Ошибки — Problem Details (RFC 9457) с машиночитаемым `code`: `VALIDATION_FAILED` (с `errors[]` по полям), `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_REUSED`, `UNAUTHENTICATED`, `BAD_CREDENTIALS`, `FORBIDDEN`, `CSRF_INVALID` (CSRF-токена нет или он устарел: получите новый и повторите), `NOT_FOUND`, `VERSION_CONFLICT` (с текущим состоянием в `current`), `INVALID_ASSIGNEE`. У остальных HTTP-ошибок код — имя статуса, например `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`.
+- Ошибки — Problem Details (RFC 9457) с машиночитаемым `code`: `VALIDATION_FAILED` (с `errors[]` по полям), `IDEMPOTENCY_KEY_REQUIRED`, `IDEMPOTENCY_KEY_REUSED`, `UNAUTHENTICATED`, `BAD_CREDENTIALS`, `FORBIDDEN`, `CSRF_INVALID` (CSRF-токена нет или он устарел: получите новый и повторите), `NOT_FOUND`, `VERSION_CONFLICT` (с текущим состоянием в `current`), `INVALID_STATE` (действие недоступно в текущем состоянии), `INVALID_ASSIGNEE`. У остальных HTTP-ошибок код — имя статуса, например `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE`.
 - Повторное создание с тем же `Idempotency-Key` возвращает первый ответ с заголовком `Idempotent-Replayed: true`.
 
 ### Как заявка доходит до результата
@@ -74,6 +77,27 @@ make ps        # состояние сервисов
 4. Результат заодно подтверждает доставку: заявка, застрявшая в `UNKNOWN`, становится `ACKNOWLEDGED` и повторно не отправляется.
 
 Состояние обмена оператор видит в блоке `exchange` карточки: попытки, следующая попытка, последняя ошибка, когда и как подтверждена доставка. Каждый результат меняет `version` заявки, поэтому перед правкой перечитайте карточку.
+
+### Проблемы и действия оператора
+
+То, что требует человека, становится **проблемой** (подробно — `docs/specs/operator-problems.md`):
+
+| Проблема | Когда | Кто закрывает |
+|---|---|---|
+| `DELIVERY_UNKNOWN` | ответ на отправку потерян: дошла ли заявка — неизвестно | система, когда перевозчик подтвердит получение (ответом или результатом) |
+| `DELIVERY_FAILED` | попытки кончились или перевозчик отверг запрос | система при подтверждении; оператор — «Повторить» |
+| `INVALID_MESSAGE` | перевозчик прислал запись, нарушающую контракт | оператор — «Разобрано» с комментарием |
+| `MESSAGE_FAILED` | `dispatch` не смог обработать запись | оператор — «Разобрано» с комментарием |
+| `RESULT_CONFLICT` | запись расходится с уже применённым результатом | оператор — «принять перевозчика» (только итоговую запись) или «оставить наш», с комментарием |
+
+Проблема открывается и закрывается в той же транзакции, что и вызвавший её переход. Решение оператора (кто, когда, что, комментарий) хранится в самой проблеме. «Повторить» не сбрасывает номер попытки: он только растёт, а лимит и паузы отсчитываются заново от момента повтора.
+
+Допущения:
+
+- «Принять перевозчика» — единственный способ изменить итоговый результат после того, как он стал итоговым; автоматически итог не меняется никогда.
+- Плохую запись повторно не разбираем: итог такой заявки подтянет сверка (`docs/specs/reconciliation.md`), оператор закрывает проблему «Разобрано».
+- Проблемы записей, в которых не удалось прочитать известный `operationId`, не привязаны к заявке, и их видят операторы всех служб.
+- `409 PAYLOAD_MISMATCH` от перевозчика означает ошибку у нас (содержимое заявки неизменяемо) и становится `DELIVERY_FAILED`.
 
 ### Пример с curl
 
@@ -97,6 +121,21 @@ curl -s -b "$JAR" "$API/api/requests?businessStatus=SUCCEEDED"   # через с
 # Правка: id и текущая версия берутся из карточки
 curl -s -c "$JAR" -b "$JAR" -X PATCH -H "X-XSRF-TOKEN: $(token)" -H 'Content-Type: application/json' \
      -d '{"version":<version>,"comment":"Fragile"}' $API/api/requests/<id>
+```
+
+Действия оператора (войдите как `north.operator` тем же способом):
+
+```bash
+curl -s -b "$JAR" "$API/api/problems?kind=INVALID_MESSAGE&kind=RESULT_CONFLICT"
+
+# Повторить отправку заявки в FAILED или UNKNOWN
+curl -s -c "$JAR" -b "$JAR" -X POST -H "X-XSRF-TOKEN: $(token)" -H "Idempotency-Key: $(uuidgen)" \
+     $API/api/requests/<id>/retry
+
+# Решить проблему: APPLY_CARRIER / KEEP_OURS для конфликта, ACKNOWLEDGED для плохой записи
+curl -s -c "$JAR" -b "$JAR" -H "X-XSRF-TOKEN: $(token)" -H 'Content-Type: application/json' \
+     -H "Idempotency-Key: $(uuidgen)" -d '{"decision":"ACKNOWLEDGED","comment":"Сообщил перевозчику"}' \
+     $API/api/problems/<problemId>/resolve
 ```
 
 ## Эмулятор перевозчика

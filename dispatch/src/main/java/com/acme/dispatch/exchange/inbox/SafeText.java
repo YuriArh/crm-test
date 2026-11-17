@@ -4,7 +4,7 @@ package com.acme.dispatch.exchange.inbox;
  * Text taken from a carrier record or an exception, made safe to store and log: control characters are written as
  * {@code \}{@code uXXXX} (the database refuses NUL in any text column) and the length is bounded.
  */
-final class SafeText {
+public final class SafeText {
 
     static final int MAX_LENGTH = 500;
 
@@ -15,7 +15,7 @@ final class SafeText {
         return of(value, MAX_LENGTH);
     }
 
-    static String of(String value, int maxLength) {
+    public static String of(String value, int maxLength) {
         if (value == null) {
             return null;
         }

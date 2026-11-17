@@ -131,18 +131,24 @@ public class InboxDao {
                 .optional();
     }
 
-    /** Content of the applied message with this sequence, if any (to tell a harmless repeat from a conflict). */
+    /**
+     * Content of the record applied to the request now ({@code applied_inbox_id}), if it has this sequence: to tell a
+     * harmless repeat from a conflict. The applied record is the one processing applied last, or the one an operator
+     * chose in a conflict; a smaller sequence is stale whatever its content.
+     */
     Optional<String> appliedContent(UUID operationId, int sequence) {
         return jdbc.sql("""
-                        SELECT payload FROM inbox
-                         WHERE operation_id = :operationId AND sequence = :sequence AND processing_status = 'APPLIED'""")
+                        SELECT i.payload FROM dispatch_operation o
+                          JOIN inbox i ON i.id = o.applied_inbox_id
+                         WHERE o.operation_id = :operationId AND i.sequence = :sequence""")
                 .param("operationId", operationId)
                 .param("sequence", sequence)
                 .query((rs, row) -> ResultMessage.parse(JSON.readTree(rs.getString("payload"))).content())
                 .optional();
     }
 
-    void applyToRequest(UUID requestId, ResultMessage message, Instant now) {
+    /** Writes a result to the request: business status and result fields, {@code version + 1}. */
+    public void applyToRequest(UUID requestId, ResultMessage message, Instant now) {
         BigDecimal price = "SUCCEEDED".equals(message.status()) ? message.price() : null;
         jdbc.sql("""
                         UPDATE delivery_request
@@ -162,19 +168,21 @@ public class InboxDao {
     }
 
     /**
-     * Records the applied sequence. A result also proves the carrier has the operation, so delivery that was not
-     * confirmed yet becomes {@code ACKNOWLEDGED} (via RESULT) and any scheduled retry is cancelled.
+     * Records the applied sequence and the applied record. A result also proves the carrier has the operation, so
+     * delivery that was not confirmed yet becomes {@code ACKNOWLEDGED} (via RESULT) and any scheduled retry is
+     * cancelled. Returns whether it confirmed the delivery just now.
      */
-    void applyToOperation(UUID operationId, int sequence, Instant now) {
+    boolean applyToOperation(UUID operationId, int sequence, UUID inboxId, Instant now) {
         jdbc.sql("""
                         UPDATE dispatch_operation
-                           SET last_applied_seq = :sequence, updated_at = :now
+                           SET last_applied_seq = :sequence, applied_inbox_id = :inboxId, updated_at = :now
                          WHERE operation_id = :operationId""")
                 .param("sequence", sequence)
+                .param("inboxId", inboxId)
                 .param("now", toSql(now))
                 .param("operationId", operationId)
                 .update();
-        jdbc.sql("""
+        return jdbc.sql("""
                         UPDATE dispatch_operation
                            SET delivery_status = 'ACKNOWLEDGED', acknowledged_at = :now, acknowledged_via = 'RESULT',
                                locked_until = NULL, last_error = NULL, updated_at = :now
@@ -182,15 +190,50 @@ public class InboxDao {
                            AND delivery_status IN ('PENDING', 'SENDING', 'RETRY_WAIT', 'UNKNOWN', 'FAILED')""")
                 .param("now", toSql(now))
                 .param("operationId", operationId)
+                .update() == 1;
+    }
+
+    /** The raw text of a record. */
+    String payloadOf(UUID inboxId) {
+        return jdbc.sql("SELECT payload FROM inbox WHERE id = :id")
+                .param("id", inboxId)
+                .query(String.class)
+                .single();
+    }
+
+    /**
+     * An operator chose this record: it becomes the applied one; the applied sequence never goes back. Delivery is
+     * already confirmed (results of the operation were applied before).
+     */
+    void makeApplied(UUID operationId, int sequence, UUID inboxId, Instant now) {
+        jdbc.sql("""
+                        UPDATE dispatch_operation
+                           SET last_applied_seq = GREATEST(last_applied_seq, :sequence), applied_inbox_id = :inboxId,
+                               updated_at = :now
+                         WHERE operation_id = :operationId""")
+                .param("sequence", sequence)
+                .param("inboxId", inboxId)
+                .param("now", toSql(now))
+                .param("operationId", operationId)
                 .update();
     }
 
+    /** The request of an operation, if the operation is known; nothing is locked. */
+    Optional<UUID> requestOf(UUID operationId) {
+        return jdbc.sql("SELECT request_id FROM dispatch_operation WHERE operation_id = :operationId")
+                .param("operationId", operationId)
+                .query(UUID.class)
+                .optional();
+    }
+
     /** How a processed record was decided; stored as {@code inbox.processing_status}. */
-    enum Decision {
+    public enum Decision {
         APPLIED,
         STALE,
         CONFLICT,
-        INVALID
+        INVALID,
+        /** Processing kept failing; recorded only by {@link #recordFailed}. */
+        FAILED
     }
 
     /** A received record claimed for processing. */

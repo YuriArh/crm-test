@@ -12,6 +12,7 @@ import com.acme.dispatch.carrier.SubmitOutcome;
 import com.acme.dispatch.carrier.SubmitResult;
 import com.acme.dispatch.common.BusinessCalendar;
 import com.acme.dispatch.config.IdGenerator;
+import com.acme.dispatch.problem.ProblemService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,9 +51,11 @@ public class SendWorker {
     private final TransactionTemplate transaction;
     private final ExchangeProperties properties;
     private final RetryPolicy retryPolicy;
+    private final ProblemService problems;
 
     public SendWorker(SendQueueDao queue, ExchangeAttemptDao attempts, CarrierClient carrier, BusinessCalendar calendar,
-                      IdGenerator ids, TransactionTemplate transaction, ExchangeProperties properties) {
+                      IdGenerator ids, TransactionTemplate transaction, ExchangeProperties properties,
+                      ProblemService problems) {
         this.queue = queue;
         this.attempts = attempts;
         this.carrier = carrier;
@@ -61,6 +64,7 @@ public class SendWorker {
         this.transaction = transaction;
         this.properties = properties;
         this.retryPolicy = RetryPolicy.forSending(properties);
+        this.problems = problems;
     }
 
     @Scheduled(fixedDelayString = "${app.exchange.send-interval-ms:1000}")
@@ -91,6 +95,8 @@ public class SendWorker {
     /**
      * An operation left in {@code SENDING} past its lease is an attempt with an unknown outcome: the same retry
      * policy as for a timeout decides between a paused retry and {@code FAILED}; the attempt was counted at claim.
+     * The policy counts attempts within the current budget ({@code attempts - retry_from}): an operator's retry
+     * starts a new one without resetting the attempt number.
      */
     private void recover() {
         transaction.executeWithoutResult(status -> {
@@ -98,14 +104,21 @@ public class SendWorker {
             List<UUID> rescheduled = new ArrayList<>();
             List<UUID> failed = new ArrayList<>();
             for (SendQueueDao.Expired expired : queue.findExpired(now)) {
-                if (retryPolicy.canRetry(expired.attempt())) {
-                    Instant next = now.plus(retryPolicy.backoff(expired.attempt()));
+                int inBudget = expired.attemptInBudget();
+                if (retryPolicy.canRetry(inBudget)) {
+                    Instant next = now.plus(retryPolicy.backoff(inBudget));
                     if (queue.rescheduleInterrupted(expired, next, INTERRUPTED, now)) {
                         rescheduled.add(expired.operationId());
+                        problems.onDeliveryStatus(expired.requestId(), expired.operationId(), DeliveryStatus.UNKNOWN,
+                                INTERRUPTED, INTERRUPTED, now);
                     }
-                } else if (queue.failInterrupted(expired,
-                        "Attempts exhausted (" + expired.attempt() + "): " + INTERRUPTED, now)) {
-                    failed.add(expired.operationId());
+                } else {
+                    String error = "Attempts exhausted (" + inBudget + "): " + INTERRUPTED;
+                    if (queue.failInterrupted(expired, error, now)) {
+                        failed.add(expired.operationId());
+                        problems.onDeliveryStatus(expired.requestId(), expired.operationId(), DeliveryStatus.FAILED,
+                                error, INTERRUPTED, now);
+                    }
                 }
             }
             if (!rescheduled.isEmpty()) {
@@ -157,28 +170,47 @@ public class SendWorker {
         // Measured from the instant stored as started_at, so started_at + duration = finished_at.
         attempts.finish(claimed.operationId(), claimed.attempt(), result, now,
                 Duration.between(claimed.claimedAt(), now));
-        boolean updated = switch (result.outcome()) {
-            case ACKNOWLEDGED -> queue.acknowledge(claimed, now);
+        Optional<Transition> transition = switch (result.outcome()) {
+            case ACKNOWLEDGED -> queue.acknowledge(claimed, now)
+                    ? Optional.of(new Transition(DeliveryStatus.ACKNOWLEDGED, null))
+                    : Optional.empty();
             case TEMPORARY_ERROR -> retryOrFail(claimed, DeliveryStatus.RETRY_WAIT, result, now);
             case UNKNOWN -> retryOrFail(claimed, DeliveryStatus.UNKNOWN, result, now);
-            case PERMANENT_ERROR, PAYLOAD_CONFLICT -> queue.fail(claimed, result.error(), now);
+            case PERMANENT_ERROR, PAYLOAD_CONFLICT -> queue.fail(claimed, result.error(), now)
+                    ? Optional.of(new Transition(DeliveryStatus.FAILED, result.error()))
+                    : Optional.empty();
         };
-        if (!updated) {
+        if (transition.isEmpty()) {
             // The claim is no longer ours: a result already confirmed delivery, or the lease expired and the
             // operation was recovered. The attempt is recorded; the newer state stays.
             log.debug("Operation {} changed while sending attempt {}; outcome {} recorded only in history",
                     claimed.operationId(), claimed.attempt(), result.outcome());
-        } else if (result.outcome() != SubmitOutcome.ACKNOWLEDGED) {
+            return;
+        }
+        problems.onDeliveryStatus(claimed.requestId(), claimed.operationId(), transition.get().status(),
+                transition.get().error(), result.outcome() == SubmitOutcome.UNKNOWN ? result.error() : null, now);
+        if (result.outcome() != SubmitOutcome.ACKNOWLEDGED) {
             log.info("Operation {} attempt {}: {} ({})", claimed.operationId(), claimed.attempt(), result.outcome(),
                     result.error());
         }
     }
 
-    private boolean retryOrFail(SendQueueDao.Claimed claimed, DeliveryStatus status, SubmitResult result, Instant now) {
-        if (!retryPolicy.canRetry(claimed.attempt())) {
-            return queue.fail(claimed, "Attempts exhausted (" + claimed.attempt() + "): " + result.error(), now);
+    private Optional<Transition> retryOrFail(SendQueueDao.Claimed claimed, DeliveryStatus status, SubmitResult result,
+                                             Instant now) {
+        int inBudget = claimed.attemptInBudget();
+        if (!retryPolicy.canRetry(inBudget)) {
+            String error = "Attempts exhausted (" + inBudget + "): " + result.error();
+            return queue.fail(claimed, error, now)
+                    ? Optional.of(new Transition(DeliveryStatus.FAILED, error))
+                    : Optional.empty();
         }
-        Instant next = now.plus(retryPolicy.backoff(claimed.attempt()));
-        return queue.scheduleRetry(claimed, status, next, result.error(), now);
+        Instant next = now.plus(retryPolicy.backoff(inBudget));
+        return queue.scheduleRetry(claimed, status, next, result.error(), now)
+                ? Optional.of(new Transition(status, result.error()))
+                : Optional.empty();
+    }
+
+    /** A transition that took effect: the new status and the operation's new {@code last_error}. */
+    private record Transition(DeliveryStatus status, String error) {
     }
 }

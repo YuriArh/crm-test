@@ -494,8 +494,83 @@ class SendWorkerTests {
                 .query(Integer.class).single()).isEqualTo(30);
     }
 
+    @Test
+    void retryBudgetCountsFromRetryFrom() {
+        RequestCard request = requests.create("1");
+        newBudgetAfter(request, properties.maxAttempts());
+        carrier.answer(UNKNOWN);
+
+        assertThat(worker.runOnce()).isEqualTo(1);
+
+        DispatchOperation operation = operation(request);
+        assertThat(operation.deliveryStatus()).as("first attempt of the new budget").isEqualTo(DeliveryStatus.UNKNOWN);
+        assertThat(operation.attempts()).isEqualTo(properties.maxAttempts() + 1);
+        // The pause after the first attempt of a budget: 5 s, ±20 %.
+        assertThat(Duration.between(START, operation.nextAttemptAt()))
+                .isBetween(Duration.ofSeconds(4), Duration.ofSeconds(6));
+    }
+
+    @Test
+    void budgetRunsOutAfterMaxAttemptsFromRetryFrom() {
+        int max = properties.maxAttempts();
+        RequestCard request = requests.create("1");
+        newBudgetAfter(request, max);
+        jdbc.sql("UPDATE dispatch_operation SET attempts = :attempts WHERE request_id = :id")
+                .param("attempts", 2 * max - 1)
+                .param("id", request.id())
+                .update();
+        carrier.answer(TEMPORARY);
+
+        assertThat(worker.runOnce()).isEqualTo(1);
+
+        DispatchOperation operation = operation(request);
+        assertThat(operation.deliveryStatus()).isEqualTo(DeliveryStatus.FAILED);
+        assertThat(operation.attempts()).isEqualTo(2 * max);
+        assertThat(operation.lastError()).isEqualTo("Attempts exhausted (" + max + "): HTTP 503");
+    }
+
+    @Test
+    void attemptNumbersContinueAfterANewBudget() {
+        int max = properties.maxAttempts();
+        RequestCard request = requests.create("1");
+        newBudgetAfter(request, max);
+
+        worker.runOnce();
+
+        assertThat(attempts(request)).containsExactly((max + 1) + ":ACKNOWLEDGED:202:finished");
+    }
+
+    @Test
+    void recoveryUsesTheBudgetToo() {
+        int max = properties.maxAttempts();
+        RequestCard request = requests.create("1");
+        newBudgetAfter(request, max);
+        crashedMidSend(request, max + 1);
+
+        assertThat(worker.runOnce()).isZero();
+
+        DispatchOperation operation = operation(request);
+        assertThat(operation.deliveryStatus()).isEqualTo(DeliveryStatus.UNKNOWN);
+        assertThat(Duration.between(START, operation.nextAttemptAt()))
+                .isBetween(Duration.ofSeconds(4), Duration.ofSeconds(6));
+    }
+
     private DispatchOperation operation(RequestCard request) {
         return operations.findByRequestId(request.id()).orElseThrow();
+    }
+
+    /**
+     * {@code attempts} attempts were made, then an operator started a new budget of retries: due now, the attempt
+     * number goes on from {@code attempts}.
+     */
+    private void newBudgetAfter(RequestCard request, int attempts) {
+        jdbc.sql("""
+                        UPDATE dispatch_operation SET delivery_status = 'UNKNOWN', attempts = :attempts,
+                               retry_from = :attempts, next_attempt_at = :now WHERE request_id = :id""")
+                .param("attempts", attempts)
+                .param("now", toSql(START))
+                .param("id", request.id())
+                .update();
     }
 
     /**

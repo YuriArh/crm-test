@@ -74,6 +74,7 @@ function card(body: CreateRequest) {
     createdAt: '2026-11-14T09:15:03Z',
     updatedAt: '2026-11-14T09:15:03Z',
     version: 0,
+    actions: [],
   } satisfies RequestCard;
 }
 

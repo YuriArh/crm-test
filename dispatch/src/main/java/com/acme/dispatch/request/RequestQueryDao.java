@@ -174,7 +174,9 @@ public class RequestQueryDao {
                 instant(rs, "created_at"),
                 instant(rs, "updated_at"),
                 rs.getLong("version"),
-                exchange);
+                exchange,
+                List.of(),
+                null);
         return new CardRow(card, rs.getObject("owner_id", UUID.class), rs.getObject("service_id", UUID.class));
     }
 

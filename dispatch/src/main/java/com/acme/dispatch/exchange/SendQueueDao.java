@@ -34,7 +34,7 @@ public class SendQueueDao {
      */
     List<Expired> findExpired(Instant now) {
         return jdbc.sql("""
-                        SELECT request_id, operation_id, attempts FROM dispatch_operation
+                        SELECT request_id, operation_id, attempts, retry_from FROM dispatch_operation
                          WHERE delivery_status = 'SENDING' AND locked_until < :now
                          ORDER BY locked_until
                            FOR UPDATE SKIP LOCKED""")
@@ -42,7 +42,8 @@ public class SendQueueDao {
                 .query((rs, row) -> new Expired(
                         rs.getObject("request_id", UUID.class),
                         rs.getObject("operation_id", UUID.class),
-                        rs.getInt("attempts")))
+                        rs.getInt("attempts"),
+                        rs.getInt("retry_from")))
                 .list();
     }
 
@@ -95,7 +96,7 @@ public class SendQueueDao {
                                 ORDER BY next_attempt_at, request_id
                                 LIMIT 1
                                 FOR UPDATE SKIP LOCKED)
-                        RETURNING o.request_id, o.operation_id, o.attempts,
+                        RETURNING o.request_id, o.operation_id, o.attempts, o.retry_from,
                                   r.cargo_description, r.weight_kg, r.delivery_address, r.deadline""")
                 .param("now", toSql(now))
                 .param("leaseUntil", toSql(leaseUntil))
@@ -103,6 +104,7 @@ public class SendQueueDao {
                         rs.getObject("request_id", UUID.class),
                         rs.getObject("operation_id", UUID.class),
                         rs.getInt("attempts"),
+                        rs.getInt("retry_from"),
                         new SubmitRequest(
                                 rs.getObject("operation_id", UUID.class),
                                 rs.getString("cargo_description"),
@@ -111,6 +113,23 @@ public class SendQueueDao {
                                 rs.getObject("deadline", LocalDate.class)),
                         now))
                 .optional();
+    }
+
+    /**
+     * An operator retries the delivery: a new budget of retries starting from the attempts made so far, due now.
+     * {@code FAILED} becomes {@code PENDING}; {@code UNKNOWN} stays {@code UNKNOWN} (the carrier may have it).
+     * Conditional on the status, so it does nothing to an operation that moved on. Returns whether it retried.
+     */
+    public boolean retryByOperator(UUID requestId, Instant now) {
+        return jdbc.sql("""
+                        UPDATE dispatch_operation
+                           SET delivery_status = CASE delivery_status WHEN 'FAILED' THEN 'PENDING'
+                                                     ELSE delivery_status END,
+                               retry_from = attempts, next_attempt_at = :now, last_error = NULL, updated_at = :now
+                         WHERE request_id = :requestId AND delivery_status IN ('FAILED', 'UNKNOWN')""")
+                .param("now", toSql(now))
+                .param("requestId", requestId)
+                .update() == 1;
     }
 
     /** The carrier confirmed receipt. */
@@ -158,18 +177,31 @@ public class SendQueueDao {
     /**
      * An operation claimed for sending.
      *
-     * @param attempt   number of this attempt (1-based); also the fencing token for the completion update
+     * @param attempt   number of this attempt (1-based, never reset); also the fencing token for the completion update
+     * @param retryFrom the attempt number the current retry budget started from (an operator's retry)
      * @param claimedAt when it was claimed: the start of the attempt, written to {@code exchange_attempt.started_at}
      *                  and the base of its duration
      */
-    record Claimed(UUID requestId, UUID operationId, int attempt, SubmitRequest request, Instant claimedAt) {
+    record Claimed(UUID requestId, UUID operationId, int attempt, int retryFrom, SubmitRequest request,
+                   Instant claimedAt) {
+
+        /** Number of this attempt within the current retry budget: what the retry policy counts. */
+        int attemptInBudget() {
+            return attempt - retryFrom;
+        }
     }
 
     /**
      * An operation whose send was interrupted.
      *
-     * @param attempt number of the interrupted attempt, already counted when it was claimed; the fencing token
+     * @param attempt   number of the interrupted attempt, already counted when it was claimed; the fencing token
+     * @param retryFrom the attempt number the current retry budget started from
      */
-    record Expired(UUID requestId, UUID operationId, int attempt) {
+    record Expired(UUID requestId, UUID operationId, int attempt, int retryFrom) {
+
+        /** Number of the interrupted attempt within the current retry budget. */
+        int attemptInBudget() {
+            return attempt - retryFrom;
+        }
     }
 }

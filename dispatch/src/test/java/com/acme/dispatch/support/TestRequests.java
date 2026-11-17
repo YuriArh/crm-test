@@ -32,8 +32,11 @@ public class TestRequests {
     }
 
     public RequestCard create(String cargo, String weightKg, String address) {
-        CurrentUser initiator = CurrentUser.from(users.findByUsernameIgnoreCase(DemoData.NORTH_INITIATOR_LOGIN)
-                .orElseThrow());
+        return createAs(DemoData.NORTH_INITIATOR_LOGIN, cargo, weightKg, address);
+    }
+
+    public RequestCard createAs(String initiatorLogin, String cargo, String weightKg, String address) {
+        CurrentUser initiator = CurrentUser.from(users.findByUsernameIgnoreCase(initiatorLogin).orElseThrow());
         return requests.create(initiator, UUID.randomUUID().toString(),
                 new CreateRequestBody(cargo, new BigDecimal(weightKg), address, DEADLINE)).body();
     }

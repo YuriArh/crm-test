@@ -60,6 +60,8 @@ tags:
     description: Users shown in pickers.
   - name: requests
     description: Delivery requests.
+  - name: problems
+    description: Problems of the exchange that need an operator, and the operator's decisions.
 
 paths:
   /api/system/info:
@@ -391,7 +393,7 @@ paths:
       tags: [requests]
       operationId: getRequest
       summary: Request card
-      description: '`exchange` is present for operators only.'
+      description: '`exchange` and `problems` are present for operators only; `actions` is empty for initiators.'
       responses:
         '200':
           description: The request card.
@@ -480,6 +482,220 @@ paths:
                     detail: Assignee must be an operator of the same service
                     instance: /api/requests/0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60
                     code: INVALID_ASSIGNEE
+
+  /api/requests/{id}/retry:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id. A malformed id answers `404`, like a missing request.
+        schema:
+          type: string
+    post:
+      tags: [problems]
+      operationId: retryDelivery
+      summary: Retry the delivery
+      security:
+        - session: []
+          csrf: []
+      description: |
+        Operators of the request's service only. Allowed while the delivery is `FAILED` or `UNKNOWN`
+        (`actions` of the card has `RETRY`). Starts a new budget of retries and sends at once, with the same
+        `operationId`: the carrier never executes one operation twice. `FAILED` becomes `PENDING`; `UNKNOWN`
+        stays `UNKNOWN` until the carrier confirms receipt. An open `DELIVERY_FAILED` problem is closed as
+        `RETRIED`.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Client-generated key of this action, at most 100 characters.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+      responses:
+        '200':
+          description: The card after the retry, or the replay of an earlier retry with the same key.
+          headers:
+            Idempotent-Replayed:
+              description: '`true` when this response was replayed for a repeated `Idempotency-Key`.'
+              schema:
+                type: string
+                enum: ['true', 'false']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestCard'
+        '400':
+          description: No `Idempotency-Key` header (`IDEMPOTENCY_KEY_REQUIRED`) or a too long one.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`INVALID_STATE`: the delivery is neither `FAILED` nor `UNKNOWN` now.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                invalidState:
+                  value:
+                    title: Action is not allowed in the current state
+                    status: 409
+                    detail: Delivery of request DR-000123 is ACKNOWLEDGED; only FAILED or UNKNOWN can be retried
+                    instance: /api/requests/0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60/retry
+                    code: INVALID_STATE
+        '422':
+          description: The `Idempotency-Key` was already used for another action or request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/problems:
+    get:
+      tags: [problems]
+      operationId: listProblems
+      summary: Problems of the exchange
+      description: |
+        Operators only. Problems of the requests of the caller's service, and problems of carrier records
+        that name no known request (every operator sees those). Newest first (`openedAt`, then `id`).
+      parameters:
+        - name: status
+          in: query
+          description: '`ALL` — open and resolved.'
+          schema:
+            type: string
+            enum: [OPEN, RESOLVED, ALL]
+            default: OPEN
+        - name: kind
+          in: query
+          description: One or more kinds (`kind=A&kind=B`); every kind when omitted.
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/ProblemKind'
+        - name: page
+          in: query
+          description: Page number, from 0.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: One page of problems.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExchangeProblemPage'
+              examples:
+                conflict:
+                  $ref: '#/components/examples/ProblemPage'
+        '400':
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/problems/{id}/resolve:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Problem id. A malformed id answers `404`, like a missing problem.
+        schema:
+          type: string
+    post:
+      tags: [problems]
+      operationId: resolveProblem
+      summary: Decide on a problem
+      security:
+        - session: []
+          csrf: []
+      description: |
+        Operators only; a problem of another service answers `404`. The decision must be one of the problem's
+        `actions`: `APPLY_CARRIER` (replace the request's result with the disputed final record) or `KEEP_OURS`
+        for `RESULT_CONFLICT`; `ACKNOWLEDGED` for `INVALID_MESSAGE` and `MESSAGE_FAILED`. Delivery problems are
+        closed by the system or by retrying the delivery. `APPLY_CARRIER` bumps the request's `version`.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Client-generated key of this action, at most 100 characters.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveProblem'
+            examples:
+              keep:
+                value:
+                  decision: KEEP_OURS
+                  comment: Перевозчик подтвердил прежний номер
+      responses:
+        '200':
+          description: The problem after the decision, or the replay of an earlier decision with the same key.
+          headers:
+            Idempotent-Replayed:
+              description: '`true` when this response was replayed for a repeated `Idempotency-Key`.'
+              schema:
+                type: string
+                enum: ['true', 'false']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExchangeProblem'
+        '400':
+          description: Invalid body, or no `Idempotency-Key` header (`IDEMPOTENCY_KEY_REQUIRED`).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No such problem in the caller's scope.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: '`INVALID_STATE`: the problem is resolved already, or the decision is not one of its `actions`.'
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: The `Idempotency-Key` was already used for another action or problem.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
 
 components:
   securitySchemes:
@@ -607,6 +823,7 @@ components:
         createdAt: '2026-11-12T09:15:03Z'
         updatedAt: '2026-11-12T09:15:03Z'
         version: 0
+        actions: []
     CardSucceeded:
       summary: Delivered, as an operator sees it
       value:
@@ -641,6 +858,47 @@ components:
           lastError: null
           acknowledgedAt: '2026-11-12T09:15:04Z'
           acknowledgedVia: RESPONSE
+        actions: []
+        problems: []
+    ProblemPage:
+      summary: An open result conflict, as an operator sees it
+      value:
+        items:
+          - id: 0195f3a2-8a00-7000-8000-000000000001
+            kind: RESULT_CONFLICT
+            status: OPEN
+            details: Sequence 2 was already applied with different content
+            openedAt: '2026-11-12T09:20:00Z'
+            resolvedAt: null
+            request:
+              id: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60
+              number: DR-000123
+            operationId: 0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f
+            message:
+              messageId: 0195f3a2-9000-7000-8000-000000000002
+              feedSeq: 1043
+              status: SUCCEEDED
+              sequence: 2
+              trackingNumber: TRK-0A0B0C0D
+              price: 700
+              reason: null
+              occurredAt: '2026-11-12T09:19:58Z'
+              payloadExcerpt: '{"feedSeq":1043,"messageId":"0195f3a2-9000-7000-8000-000000000002", …}'
+            currentResult:
+              businessStatus: SUCCEEDED
+              result:
+                trackingNumber: TRK-3F1C2B4D
+                price: 612.5
+                rejectionReason: null
+                resultAt: '2026-11-12T09:15:09Z'
+            resolvedBy: null
+            decision: null
+            comment: null
+            actions: [APPLY_CARRIER, KEEP_OURS]
+        page: 0
+        size: 20
+        totalElements: 1
+        totalPages: 1
 
   schemas:
     Problem:
@@ -920,7 +1178,8 @@ components:
     RequestCard:
       type: object
       required: [id, number, cargoDescription, weightKg, deliveryAddress, deadline, comment, owner, assignee,
-                 businessStatus, result, deliveryStatus, operationId, overdue, createdAt, updatedAt, version]
+                 businessStatus, result, deliveryStatus, operationId, overdue, createdAt, updatedAt, version,
+                 actions]
       properties:
         id:
           type: string
@@ -971,3 +1230,178 @@ components:
           description: Send it back in `PATCH`.
         exchange:
           $ref: '#/components/schemas/ExchangeInfo'
+        actions:
+          type: array
+          description: Operator actions the request's state allows now; always empty for initiators.
+          items:
+            $ref: '#/components/schemas/RequestAction'
+        problems:
+          type: array
+          description: Problems of the request, open and resolved, newest first. Operators only.
+          items:
+            $ref: '#/components/schemas/ExchangeProblem'
+
+    RequestAction:
+      type: string
+      enum: [RETRY]
+      description: '`RETRY` — retry the delivery (it is `FAILED` or `UNKNOWN`).'
+
+    ProblemKind:
+      type: string
+      enum: [DELIVERY_UNKNOWN, DELIVERY_FAILED, INVALID_MESSAGE, MESSAGE_FAILED, RESULT_CONFLICT]
+      description: |
+        `DELIVERY_UNKNOWN` — unknown whether the carrier got the request (closed by the system once delivery is
+        confirmed); `DELIVERY_FAILED` — delivery failed (attempts exhausted or refused); `INVALID_MESSAGE` — the
+        carrier sent a record that breaks the contract; `MESSAGE_FAILED` — `dispatch` could not process a record;
+        `RESULT_CONFLICT` — a record disagrees with the applied result.
+
+    ProblemStatus:
+      type: string
+      enum: [OPEN, RESOLVED]
+
+    ProblemDecision:
+      type: string
+      enum: [SYSTEM, RETRIED, APPLY_CARRIER, KEEP_OURS, ACKNOWLEDGED]
+      description: |
+        How the problem was closed: `SYSTEM` — by the system (delivery confirmed); `RETRIED` — an operator retried
+        the delivery; `APPLY_CARRIER` — an operator applied the disputed record; `KEEP_OURS` — an operator kept the
+        applied result; `ACKNOWLEDGED` — an operator looked into the record.
+
+    RequestRef:
+      type: object
+      required: [id, number]
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+
+    ProblemMessage:
+      type: object
+      description: |
+        The carrier record behind the problem: the fields that could be read (each `null` when it could not)
+        and the beginning of the raw text, with control characters escaped.
+      required: [messageId, feedSeq, status, sequence, trackingNumber, price, reason, occurredAt, payloadExcerpt]
+      properties:
+        messageId:
+          type: [string, 'null']
+        feedSeq:
+          type: [integer, 'null']
+          format: int64
+        status:
+          type: [string, 'null']
+        sequence:
+          type: [integer, 'null']
+        trackingNumber:
+          type: [string, 'null']
+        price:
+          type: [number, 'null']
+        reason:
+          type: [string, 'null']
+        occurredAt:
+          type: [string, 'null']
+          format: date-time
+        payloadExcerpt:
+          type: string
+          maxLength: 2000
+
+    CurrentResult:
+      type: object
+      description: The request's result now, to compare with a disputed record.
+      required: [businessStatus, result]
+      properties:
+        businessStatus:
+          $ref: '#/components/schemas/BusinessStatus'
+        result:
+          oneOf:
+            - $ref: '#/components/schemas/BusinessResult'
+            - type: 'null'
+
+    ExchangeProblem:
+      type: object
+      required: [id, kind, status, details, openedAt, resolvedAt, request, operationId, message, currentResult,
+                 resolvedBy, decision, comment, actions]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/ProblemKind'
+        status:
+          $ref: '#/components/schemas/ProblemStatus'
+        details:
+          type: string
+          description: Why it was opened.
+        openedAt:
+          type: string
+          format: date-time
+        resolvedAt:
+          type: [string, 'null']
+          format: date-time
+        request:
+          description: '`null` for a record that names no known request.'
+          oneOf:
+            - $ref: '#/components/schemas/RequestRef'
+            - type: 'null'
+        operationId:
+          type: [string, 'null']
+          format: uuid
+        message:
+          description: For `INVALID_MESSAGE`, `MESSAGE_FAILED`, `RESULT_CONFLICT`; otherwise `null`.
+          oneOf:
+            - $ref: '#/components/schemas/ProblemMessage'
+            - type: 'null'
+        currentResult:
+          description: For `RESULT_CONFLICT`; otherwise `null`.
+          oneOf:
+            - $ref: '#/components/schemas/CurrentResult'
+            - type: 'null'
+        resolvedBy:
+          description: The operator who closed it; `null` while open or when the system closed it.
+          oneOf:
+            - $ref: '#/components/schemas/PersonRef'
+            - type: 'null'
+        decision:
+          oneOf:
+            - $ref: '#/components/schemas/ProblemDecision'
+            - type: 'null'
+        comment:
+          type: [string, 'null']
+        actions:
+          type: array
+          description: Decisions an operator may take now; decided by the server.
+          items:
+            $ref: '#/components/schemas/ProblemDecision'
+
+    ResolveProblem:
+      type: object
+      additionalProperties: false
+      required: [decision, comment]
+      properties:
+        decision:
+          type: string
+          enum: [APPLY_CARRIER, KEEP_OURS, ACKNOWLEDGED]
+        comment:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: The ground for the decision; stored stripped, must not be blank.
+
+    ExchangeProblemPage:
+      type: object
+      required: [items, page, size, totalElements, totalPages]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExchangeProblem'
+        page:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
