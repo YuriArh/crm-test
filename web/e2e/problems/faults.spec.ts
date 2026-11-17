@@ -47,6 +47,36 @@ test('a broken carrier record is acknowledged with a comment in the card', async
   await expect(problems.getByText('Сообщил перевозчику о битой цене')).toBeVisible();
 });
 
+test('a broken carrier record is found in the problems list and acknowledged in its panel', async ({ page }) => {
+  test.setTimeout(SYSTEM_TIMEOUT + 30_000);
+  await setFaults({ malformed: true });
+  const request = await createRequestViaApi(page, 'north.initiator', { cargoDescription: uniqueCargo('Проблемы список') });
+  await signInViaApi(page, 'north.operator');
+
+  await page.goto('/problems?kind=%5B%22INVALID_MESSAGE%22%5D');
+  const row = page.getByRole('row').filter({ hasText: request.number });
+  await expect(row).toBeVisible({ timeout: SYSTEM_TIMEOUT });
+  await setFaults({});
+
+  await row.getByRole('link', { name: 'Некорректное сообщение перевозчика' }).click();
+  const panel = page.getByRole('dialog', { name: 'Некорректное сообщение перевозчика' });
+  await expect(panel.getByRole('region', { name: 'Сообщение перевозчика' })).toContainText('price');
+  await panel.getByRole('button', { name: 'Разобрано' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Разобрано' });
+  await dialog.getByRole('textbox', { name: 'Комментарий' }).fill('Цена испорчена, итог подтянет сверка');
+  await dialog.getByRole('button', { name: 'Сохранить решение' }).click();
+
+  await expect(panel.getByText(/Оператор \(Север\) · Разобрано/)).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Разобрано' })).toHaveCount(0);
+  await expect(page.getByRole('row').filter({ hasText: request.number })).toHaveCount(0);
+  await panel.getByRole('button', { name: 'Закрыть' }).click();
+  await expect(page).toHaveURL(/\/problems\?kind=/);
+
+  // The segmented control's radio inputs are hidden; a person clicks the caption.
+  await page.getByRole('radiogroup', { name: 'Статус' }).getByText('Закрытые', { exact: true }).click();
+  await expect(page.getByRole('row').filter({ hasText: request.number })).toContainText('Разобрано · Оператор (Север)');
+});
+
 test('a lost answer shows «unknown whether received» in the card until the system closes it', async ({ page }) => {
   test.setTimeout(SYSTEM_TIMEOUT + 30_000);
   // A lost answer alone is not enough: the result comes by the feed before the send times out.

@@ -1,6 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { createRouter, type RouterHistory } from '@tanstack/react-router';
 import { authenticatedRoute, loginRoute } from '@/auth/routes';
+import { problemListRoute, problemRoute } from '@/problems/routes';
 import { requestCardRoute } from '@/requests/card/routes';
 import { createRequestRoute } from '@/requests/create/routes';
 import { homeRedirectRoute, requestListRoute } from '@/requests/list/routes';
@@ -13,7 +14,13 @@ export type { RouterContext } from './rootRoute';
 // Modules add their routes here: public ones under the root, signed-in ones under authenticatedRoute.
 const routeTree = rootRoute.addChildren([
   loginRoute,
-  authenticatedRoute.addChildren([homeRedirectRoute, requestListRoute, createRequestRoute, requestCardRoute]),
+  authenticatedRoute.addChildren([
+    homeRedirectRoute,
+    requestListRoute,
+    createRequestRoute,
+    requestCardRoute,
+    problemListRoute.addChildren([problemRoute]),
+  ]),
 ]);
 
 export function createAppRouter(queryClient: QueryClient, options: { history?: RouterHistory } = {}) {
