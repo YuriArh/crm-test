@@ -4,5 +4,6 @@ export const requestKeys = {
   lists: ['requests', 'list'] as const,
   list: (params: object) => ['requests', 'list', params] as const,
   card: (id: string) => ['requests', 'card', id] as const,
+  history: (id: string) => ['requests', 'history', id] as const,
   operators: ['users', 'operators'] as const,
 };

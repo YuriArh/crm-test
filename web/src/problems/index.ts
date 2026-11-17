@@ -6,4 +6,4 @@ export { ResultComparison } from './details/ResultComparison';
 export { ProblemsBlock } from './ProblemsBlock';
 export { useDecisionDialog } from './resolve/useDecisionDialog';
 export { problemKeys } from './keys';
-export { kindView } from './labels';
+export { DECISION_LABELS, kindView } from './labels';

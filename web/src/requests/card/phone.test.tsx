@@ -17,7 +17,7 @@ describe('request card on a phone', () => {
     window.matchMedia = desktopMatchMedia;
   });
 
-  it('puts everything in one column: content, result, properties, comment, exchange', async () => {
+  it('puts everything in one column: content, result, properties, comment, exchange, history', async () => {
     serveCard(withExchange(pendingCard()));
     serveOperators();
     renderApp(cardPath, { me: demoOperator });
@@ -27,7 +27,15 @@ describe('request card on a phone', () => {
       .getAllByRole('region')
       .map((region) => region.getAttribute('aria-label'))
       .filter((label) => label !== null);
-    expect(order).toEqual(['Содержимое', 'Результат', 'Свойства', 'Комментарий', 'Обмен с перевозчиком', 'Сверки']);
+    expect(order).toEqual([
+      'Содержимое',
+      'Результат',
+      'Свойства',
+      'Комментарий',
+      'Обмен с перевозчиком',
+      'Сверки',
+      'История',
+    ]);
   });
 
   it('shows the save bar only while there are changes', async () => {
