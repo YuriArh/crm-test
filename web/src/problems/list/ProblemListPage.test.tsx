@@ -35,8 +35,9 @@ describe('problems list', () => {
     expect(within(rows[0]!).getByText('Некорректное сообщение перевозчика')).toBeInTheDocument();
     expect(within(rows[0]!).getByRole('link', { name: REQUEST_REF.number })).toBeInTheDocument();
     expect(within(rows[2]!).getByText('—')).toBeInTheDocument();
-    expect(queries[0]!.get('status')).toBe('OPEN');
-    expect(queries[0]!.get('size')).toBe('20');
+    // The header's counter asks the same path with size=1.
+    const list = queries.find((query) => query.get('size') === '20')!;
+    expect(list.get('status')).toBe('OPEN');
   });
 
   it('shows who closed a resolved problem and how', async () => {

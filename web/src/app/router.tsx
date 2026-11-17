@@ -7,6 +7,7 @@ import { createRequestRoute } from '@/requests/create/routes';
 import { homeRedirectRoute, requestListRoute } from '@/requests/list/routes';
 import { ErrorPage } from '@/shared/ui/ErrorPage';
 import { NotFoundPage } from '@/shared/ui/NotFoundPage';
+import { AppNav } from './AppNav';
 import { rootRoute } from './rootRoute';
 
 export type { RouterContext } from './rootRoute';
@@ -26,7 +27,7 @@ const routeTree = rootRoute.addChildren([
 export function createAppRouter(queryClient: QueryClient, options: { history?: RouterHistory } = {}) {
   return createRouter({
     routeTree,
-    context: { queryClient },
+    context: { queryClient, headerNav: AppNav },
     history: options.history,
     defaultNotFoundComponent: NotFoundPage,
     defaultErrorComponent: ErrorPage,

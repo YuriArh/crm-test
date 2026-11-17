@@ -1,4 +1,5 @@
 // The problems module as other modules see it.
+export { openCountQueryOptions } from './api';
 export { ProblemDetails } from './details/ProblemDetails';
 export { ProblemsBlock } from './ProblemsBlock';
 export { useDecisionDialog } from './resolve/useDecisionDialog';

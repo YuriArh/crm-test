@@ -57,6 +57,8 @@ test('a broken carrier record is found in the problems list and acknowledged in 
   const row = page.getByRole('row').filter({ hasText: request.number });
   await expect(row).toBeVisible({ timeout: SYSTEM_TIMEOUT });
   await setFaults({});
+  // The header counts it among the open problems.
+  await expect(page.getByRole('navigation', { name: 'Разделы' }).getByRole('link', { name: /^Проблемы, открытых: \d+$/ }).first()).toBeVisible();
 
   await row.getByRole('link', { name: 'Некорректное сообщение перевозчика' }).click();
   const panel = page.getByRole('dialog', { name: 'Некорректное сообщение перевозчика' });

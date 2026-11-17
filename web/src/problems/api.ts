@@ -20,6 +20,21 @@ export function problemsQueryOptions(params: ProblemListParams) {
   });
 }
 
+/** How often the header asks for the number of open problems. */
+export const OPEN_COUNT_REFRESH_MS = 30_000;
+
+/**
+ * The number of open problems of the operator's scope (the header's badge): one row is enough, the total is the
+ * answer. It is a hint, so a failure shows nothing; it is asked again every 30 s while the tab is visible.
+ */
+export const openCountQueryOptions = queryOptions({
+  queryKey: problemKeys.openCount,
+  queryFn: async () =>
+    (await unwrap(api.GET('/api/problems', { params: { query: { status: 'OPEN', size: 1 } } }))).totalElements,
+  refetchInterval: OPEN_COUNT_REFRESH_MS,
+  refetchIntervalInBackground: false,
+});
+
 /** One problem (the panel); asked again every 5 s while it is open, until it is closed. */
 export function problemQueryOptions(id: string) {
   return queryOptions({
