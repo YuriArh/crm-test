@@ -29,6 +29,15 @@ class RequestListQueryTest {
     }
 
     @Test
+    void problemFilterIsParsedLikeOverdue() {
+        assertThat(RequestListQuery.defaults().hasOpenProblems()).isNull();
+        assertThat(RequestListQuery.parse(null, null, null, " ", null, null, null).hasOpenProblems()).isNull();
+        assertThat(RequestListQuery.parse(null, null, null, "true", null, null, null).hasOpenProblems()).isTrue();
+        assertThat(RequestListQuery.parse(null, null, null, "FALSE", null, null, null).hasOpenProblems()).isFalse();
+        assertInvalid(() -> RequestListQuery.parse(null, null, null, "yes", null, null, null), "hasOpenProblems");
+    }
+
+    @Test
     void blankValuesMeanDefaults() {
         assertThat(RequestListQuery.parse("", " ", "", "", "", "")).isEqualTo(RequestListQuery.defaults());
     }

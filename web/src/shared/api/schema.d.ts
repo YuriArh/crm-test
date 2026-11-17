@@ -370,6 +370,8 @@ export interface components {
             assignee: components["schemas"]["PersonRef"] | null;
             /** Format: date-time */
             createdAt: string;
+            /** @description Open problems of the request; `null` for initiators, who never see problems. */
+            openProblems: number | null;
         };
         RequestPage: {
             items: components["schemas"]["RequestListItem"][];
@@ -739,6 +741,8 @@ export interface operations {
                 businessStatus?: components["schemas"]["BusinessStatus"];
                 deliveryStatus?: components["schemas"]["DeliveryStatus"];
                 overdue?: boolean;
+                /** @description Operators only (an initiator gets `403`): `true` — requests with an open problem, `false` — without one. */
+                hasOpenProblems?: boolean;
                 /** @description Page number, from 0. */
                 page?: number;
                 size?: number;
@@ -762,6 +766,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createRequest: {

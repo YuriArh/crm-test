@@ -234,6 +234,12 @@ paths:
           in: query
           schema:
             type: boolean
+        - name: hasOpenProblems
+          in: query
+          description: |
+            Operators only (an initiator gets `403`): `true` — requests with an open problem, `false` — without one.
+          schema:
+            type: boolean
         - name: page
           in: query
           description: Page number, from 0.
@@ -278,6 +284,7 @@ paths:
                           displayName: Инициатор (Север)
                         assignee: null
                         createdAt: '2026-11-12T09:15:03Z'
+                        openProblems: 0
                     page: 0
                     size: 20
                     totalElements: 1
@@ -286,6 +293,8 @@ paths:
           $ref: '#/components/responses/ValidationFailed'
         '401':
           $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [requests]
       operationId: createRequest
@@ -1081,7 +1090,7 @@ components:
     RequestListItem:
       type: object
       required: [id, number, cargoDescription, deadline, businessStatus, deliveryStatus, overdue, owner,
-                 assignee, createdAt]
+                 assignee, createdAt, openProblems]
       properties:
         id:
           type: string
@@ -1109,6 +1118,10 @@ components:
         createdAt:
           type: string
           format: date-time
+        openProblems:
+          type: [integer, 'null']
+          minimum: 0
+          description: Open problems of the request; `null` for initiators, who never see problems.
 
     RequestPage:
       type: object

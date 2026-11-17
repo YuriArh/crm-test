@@ -31,6 +31,10 @@ public class RequestQueryService {
     /** One registry page; the page and the total are read in one snapshot. */
     @Transactional(readOnly = true)
     public PageResponse<RequestListItem> list(RequestListQuery query, CurrentUser viewer) {
+        if (query.hasOpenProblems() != null && !viewer.isOperator()) {
+            // The selection alone would tell an initiator which requests have problems (NF02).
+            throw ApiException.forbidden("Only operators filter requests by problems");
+        }
         LocalDate today = calendar.today();
         List<RequestListItem> items = dao.findPage(viewer, query, today);
         long total = dao.count(viewer, query, today);

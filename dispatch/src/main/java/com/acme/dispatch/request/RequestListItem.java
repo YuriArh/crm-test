@@ -6,7 +6,7 @@ import java.util.UUID;
 
 import com.acme.dispatch.exchange.DeliveryStatus;
 
-/** A row of the request registry. */
+/** A row of the request registry; {@code openProblems} is {@code null} for initiators. */
 public record RequestListItem(
         UUID id,
         String number,
@@ -17,5 +17,6 @@ public record RequestListItem(
         boolean overdue,
         PersonRef owner,
         PersonRef assignee,
-        Instant createdAt) {
+        Instant createdAt,
+        Integer openProblems) {
 }
