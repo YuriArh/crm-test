@@ -138,9 +138,12 @@ public class OperatorActions {
                     Instant now = calendar.now();
                     if (!queue.retryByOperator(requestId, now)) {
                         throw new ApiException(ErrorCode.INVALID_STATE, "Delivery of request " + card.number()
-                                + " is " + card.deliveryStatus() + "; only FAILED or UNKNOWN can be retried");
+                                + " is " + card.deliveryStatus() + "; only FAILED or UNKNOWN can be retried, or an "
+                                + "acknowledged one the carrier lost while it has no result");
                     }
                     problems.closeByOperator(requestId, ProblemKind.DELIVERY_FAILED, ProblemDecision.RETRIED,
+                            user.id(), null, now);
+                    problems.closeByOperator(requestId, ProblemKind.EXTERNAL_MISSING, ProblemDecision.RETRIED,
                             user.id(), null, now);
                     log.info("Operator {} retried delivery of request {} (operation {}), was {}", user.username(),
                             card.number(), card.operationId(), card.deliveryStatus());
