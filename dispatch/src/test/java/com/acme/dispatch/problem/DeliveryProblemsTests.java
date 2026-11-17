@@ -20,6 +20,7 @@ import com.acme.dispatch.request.RequestCard;
 import com.acme.dispatch.support.FakeCarrier;
 import com.acme.dispatch.support.IntegrationTest;
 import com.acme.dispatch.support.MutableClock;
+import com.acme.dispatch.support.OurSide;
 import com.acme.dispatch.support.TestRequests;
 import com.acme.dispatch.support.TestRows;
 
@@ -154,6 +155,22 @@ class DeliveryProblemsTests {
 
         assertThat(problems(rejected)).containsExactly("DELIVERY_FAILED:OPEN:-:HTTP 400");
         assertThat(problems(conflicting)).containsExactly("DELIVERY_FAILED:OPEN:-:HTTP 409");
+    }
+
+    @Test
+    void deliveryProblemsHaveNoOurSide() {
+        RequestCard unknown = requests.create("1");
+        carrier.answer(TIMEOUT);
+        worker.runOnce();
+        RequestCard failed = requests.create("2");
+        carrier.answer(PERMANENT);
+        worker.runOnce();
+
+        assertThat(jdbc.sql("SELECT id FROM problem WHERE request_id IN (:ids)")
+                .param("ids", List.of(unknown.id(), failed.id()))
+                .query(UUID.class).list())
+                .hasSize(2)
+                .allSatisfy(problem -> assertThat(OurSide.of(jdbc, problem)).isEqualTo(OurSide.NOT_RECORDED));
     }
 
     @Test

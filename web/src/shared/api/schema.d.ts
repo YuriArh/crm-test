@@ -549,6 +549,19 @@ export interface components {
             businessStatus: components["schemas"]["BusinessStatus"];
             result: components["schemas"]["BusinessResult"] | null;
         };
+        /** @description A final result as it was at some moment. */
+        ResultSnapshot: {
+            /** @enum {string} */
+            status: "SUCCEEDED" | "REJECTED";
+            trackingNumber: string | null;
+            price: number | null;
+            reason: string | null;
+        };
+        /** @description Our side of a problem as it was then. */
+        OurSide: {
+            /** @description Our final result; `null` when we had none. */
+            result: components["schemas"]["ResultSnapshot"] | null;
+        };
         ExchangeProblem: {
             /** Format: uuid */
             id: string;
@@ -570,8 +583,17 @@ export interface components {
              *     `feedSeq` is `null`); otherwise `null`.
              */
             message: components["schemas"]["ProblemMessage"] | null;
-            /** @description For `RESULT_CONFLICT`, `RECONCILIATION_CONFLICT` and `EXTERNAL_MISSING`; otherwise `null`. */
+            /**
+             * @description For `RESULT_CONFLICT`, `RECONCILIATION_CONFLICT` and `EXTERNAL_MISSING`; otherwise `null`. The request's
+             *     result now: after a decision it may already be the carrier's. Compare the carrier's side with `ourSide`.
+             */
             currentResult: components["schemas"]["CurrentResult"] | null;
+            /**
+             * @description Our result when the problem was opened (for `RECONCILIATION_CONFLICT`: at its latest check while it is
+             *     open), kept as history and never changed after it is closed. `null` when the kind has no two sides or
+             *     the problem is older than this snapshot.
+             */
+            ourSide: components["schemas"]["OurSide"] | null;
             /** @description The operator who closed it; `null` while open or when the system closed it. */
             resolvedBy: components["schemas"]["PersonRef"] | null;
             decision: components["schemas"]["ProblemDecision"] | null;
@@ -607,6 +629,8 @@ export interface components {
             outcome: "MATCH" | "EXTERNAL_AHEAD" | "EXTERNAL_MISSING" | "CONFLICT" | "ERROR";
             /** @description Whether this check confirmed the delivery. */
             acknowledged: boolean;
+            /** @description Our final result when the check was decided; `null` when we had none. */
+            localResult: components["schemas"]["ResultSnapshot"] | null;
             /** @description What the carrier said about the operation; `null` when it did not answer. */
             carrierState: ("ACCEPTED" | "EXECUTED" | "NOT_FOUND") | null;
             /** @description The carrier's final result; `null` when it has none. */

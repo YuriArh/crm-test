@@ -30,6 +30,28 @@ const scheduled = reconciliation({
   details: 'Carrier unavailable: HTTP 503',
 });
 const startup = reconciliation({ checkedAt: '2026-11-17T09:00:00Z', trigger: 'STARTUP', performedBy: null });
+/** The carrier changed its number and price; ours is the default `localResult` (TRK-3F1C2B4D, 612,50 ₽). */
+const differentPrice = reconciliation({
+  checkedAt: '2026-11-17T11:20:00Z',
+  outcome: 'CONFLICT',
+  details: 'Results differ',
+  carrierResult: {
+    status: 'SUCCEEDED',
+    trackingNumber: 'TRK-FFFFFFFF',
+    price: 999,
+    reason: null,
+    sequence: 2,
+    messageId: '0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e98',
+    occurredAt: '2026-11-17T11:19:00Z',
+  },
+});
+const onlyOurs = reconciliation({
+  checkedAt: '2026-11-17T11:10:00Z',
+  outcome: 'CONFLICT',
+  carrierState: 'ACCEPTED',
+  carrierResult: null,
+  details: 'We have a result, the carrier has none',
+});
 
 async function history() {
   return screen.findByRole('region', { name: 'Сверки' });
@@ -88,8 +110,49 @@ describe('history of reconciliation checks', () => {
 
     const panel = await within(section).findByRole('region', { name: /13:00/ });
     expect(within(panel).getByText('Не ответил')).toBeInTheDocument();
-    expect(within(panel).queryByText('Номер отправления')).not.toBeInTheDocument();
+    const carrier = within(panel).getByRole('region', { name: 'У перевозчика' });
+    expect(within(carrier).getByText('Нет ответа')).toBeInTheDocument();
+    expect(within(carrier).queryByText('Номер отправления')).not.toBeInTheDocument();
+    expect(within(within(panel).getByRole('region', { name: 'У нас' })).getByText('TRK-3F1C2B4D')).toBeInTheDocument();
+    expect(within(panel).queryByText('отличается')).not.toBeInTheDocument();
     expect(within(panel).getByText('Carrier unavailable: HTTP 503')).toBeInTheDocument();
+  });
+
+  it('names what differed in the row of a conflict, without opening it', async () => {
+    renderOperatorCard([differentPrice, onlyOurs, newest, startup]);
+
+    const rows = within(await history()).getAllByRole('button');
+    expect(rows[0]).toHaveTextContent('Отличается: номер отправления, стоимость');
+    expect(rows[1]).toHaveTextContent('Итог есть только у нас');
+    expect(rows[2]).toHaveTextContent('Отличается: статус, номер отправления, стоимость, причина отказа');
+    expect(rows[3]).not.toHaveTextContent('Отличается');
+  });
+
+  it('opens a conflict as both sides of that moment, the differing fields marked in words', async () => {
+    const user = userEvent.setup();
+    renderOperatorCard([differentPrice]);
+
+    const section = await history();
+    await user.click(within(section).getAllByRole('button')[0]!);
+
+    const panel = await within(section).findByRole('region', { name: /14:20/ });
+    const carrier = within(panel).getByRole('region', { name: 'У перевозчика' });
+    const ours = within(panel).getByRole('region', { name: 'У нас' });
+    expect(within(carrier).getByText('TRK-FFFFFFFF')).toBeInTheDocument();
+    expect(within(ours).getByText('TRK-3F1C2B4D')).toBeInTheDocument();
+    expect(within(carrier).getAllByText('отличается')).toHaveLength(2);
+  });
+
+  it('marks nothing in a check that matched', async () => {
+    const user = userEvent.setup();
+    renderOperatorCard([startup]);
+
+    const section = await history();
+    await user.click(within(section).getAllByRole('button')[0]!);
+
+    const panel = await within(section).findByRole('region', { name: /12:00/ });
+    expect(within(within(panel).getByRole('region', { name: 'У нас' })).getByText('TRK-3F1C2B4D')).toBeInTheDocument();
+    expect(within(panel).queryByText('отличается')).not.toBeInTheDocument();
   });
 
   it('says there were no checks yet', async () => {

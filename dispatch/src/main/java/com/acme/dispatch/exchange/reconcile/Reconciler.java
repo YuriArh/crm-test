@@ -193,7 +193,7 @@ public class Reconciler {
 
         UUID id = ids.newId();
         dao.insert(new Row(id, requestId, operationId, now, runType, performedBy, outcome, acknowledged,
-                state.delivery(), state.localResult(), carrierState, carrierResult, answer.raw(), details, inboxId));
+                state.delivery(), state.local(), carrierState, carrierResult, answer.raw(), details, inboxId));
         act(outcome, id, requestId, operationId, state.delivery(), details, decidedEarlier.isPresent(), now);
         dao.schedule(requestId, now, ReconciliationRules.nextCheck(previous, signature, now,
                 properties.reconcilePause(), properties.reconcilePauseMax(), asked.carrierUnavailable()));

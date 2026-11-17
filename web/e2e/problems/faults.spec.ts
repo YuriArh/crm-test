@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { signInViaApi } from '../auth/helpers';
 import { createRequestViaApi, uniqueCargo } from '../requests/helpers';
 import { allFaultsOff, requireCarrier, setFaults, waitForDeferredResult, waitForReceipt } from './carrier';
+import { changeCarrierResult } from './carrierDb';
 
 // Problems from real emulator faults (web-problems.md §10.4). The switches are global, so this file runs in the
 // `faults` project: after every other test, one test at a time, every switch off before and after each test.
@@ -116,6 +117,54 @@ test('«Сверить сейчас» takes over a result the carrier has not pu
   await page.reload();
   await expect(result.getByText(tracking!)).toBeVisible();
   await expect(page.getByRole('region', { name: 'Проблемы' })).toHaveCount(0);
+});
+
+test('a resolved reconciliation conflict still shows what differed', async ({ page }) => {
+  test.setTimeout(SYSTEM_TIMEOUT + 30_000);
+  const request = await createRequestViaApi(page, 'north.initiator', { cargoDescription: uniqueCargo('Сверка расхождение') });
+  await signInViaApi(page, 'north.operator');
+  let operationId = '';
+  await expect(async () => {
+    const card = (await (await page.request.get(`/api/requests/${request.id}`)).json()) as {
+      operationId: string;
+      businessStatus: string;
+    };
+    operationId = card.operationId;
+    expect(['SUCCEEDED', 'REJECTED']).toContain(card.businessStatus);
+  }).toPass({ timeout: SYSTEM_TIMEOUT });
+  // The carrier changed its result at home (docs/specs/demo-seed.md §8.1).
+  changeCarrierResult(operationId, 'TRK-FFFFFFFF', '999.00');
+
+  await page.goto(`/requests/${request.id}`);
+  const exchange = page.getByRole('region', { name: 'Обмен с перевозчиком' });
+  await exchange.getByRole('button', { name: 'Сверить сейчас' }).click();
+  await expect(exchange.getByRole('status')).toContainText('Расхождение');
+
+  const problems = page.getByRole('region', { name: 'Проблемы' });
+  const notice = problems.getByRole('alert').filter({ hasText: 'Расхождение при сверке' });
+  await notice.getByRole('button', { name: 'Принять версию перевозчика' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Принять версию перевозчика' });
+  await dialog.getByRole('textbox', { name: 'Комментарий' }).fill('Перевозчик подтвердил новый номер');
+  await dialog.getByRole('button', { name: 'Сохранить решение' }).click();
+  await expect(page.getByText('Решение сохранено')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Результат' }).getByText('TRK-FFFFFFFF')).toBeVisible();
+
+  // The closed problem still shows both sides of the moment it was found, and the result now apart.
+  await problems.getByRole('button', { name: /Закрытые проблемы/ }).click();
+  await problems.getByRole('button', { name: /Расхождение при сверке.*Принята версия перевозчика/ }).click();
+  const carrier = problems.getByRole('region', { name: 'Версия перевозчика', exact: true });
+  await expect(carrier.getByText('TRK-FFFFFFFF', { exact: true })).toBeVisible();
+  await expect(carrier.getByText('отличается').first()).toBeVisible();
+  const ours = problems.getByRole('region', { name: 'Наш итог при обнаружении', exact: true });
+  await expect(ours).toBeVisible();
+  await expect(ours.getByText('TRK-FFFFFFFF', { exact: true })).toHaveCount(0);
+  const now = problems.getByRole('region', { name: 'Итог сейчас', exact: true });
+  await expect(now.getByText('TRK-FFFFFFFF', { exact: true })).toBeVisible();
+
+  // So does the check in «Сверки»: its row names what differed.
+  const check = page.getByRole('region', { name: 'Сверки' }).getByRole('button').first();
+  await expect(check).toContainText('Расхождение');
+  await expect(check).toContainText(/Отличается: .*номер отправления/);
 });
 
 test('a lost answer shows «unknown whether received» in the card until the system closes it', async ({ page }) => {

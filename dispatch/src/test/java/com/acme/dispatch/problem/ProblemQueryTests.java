@@ -20,6 +20,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 
 import com.acme.dispatch.auth.AppUserRepository;
@@ -372,6 +373,57 @@ class ProblemQueryTests {
                 .andExpect(jsonPath("$.reconciliations[0].details", containsString("Results match")))
                 .andExpect(jsonPath("$.reconciliations[1].trigger").value("SCHEDULED"))
                 .andExpect(jsonPath("$.reconciliations[1].performedBy").value(nullValue()));
+    }
+
+    @Test
+    void reconciliationShowsOurSide() throws Exception {
+        RequestCard request = withOurResult();
+        carrier.lookupAnswer(request.operationId(), FakeCarrier.executed(request.operationId(),
+                succeeded(9, request.operationId(), "TRK-00000002", "400.00")));
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+
+        mvc.perform(get("/api/requests/{id}", request.id()).with(asUser(users, NORTH_OPERATOR_LOGIN)))
+                .andExpect(jsonPath("$.reconciliations[0].outcome").value("CONFLICT"))
+                .andExpect(jsonPath("$.reconciliations[0].localResult.status").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.reconciliations[0].localResult.trackingNumber").value("TRK-00000001"))
+                .andExpect(jsonPath("$.reconciliations[0].localResult.price").value(325.0))
+                .andExpect(jsonPath("$.reconciliations[0].localResult.reason").value(nullValue()))
+                .andExpect(jsonPath("$.reconciliations[0].carrierResult.trackingNumber").value("TRK-00000002"))
+                .andExpect(jsonPath("$.problems[0].ourSide.result.trackingNumber").value("TRK-00000001"))
+                .andExpect(jsonPath("$.problems[0].ourSide.result.price").value(325.0));
+    }
+
+    @Test
+    void reconciliationWithoutOurResultHasNoLocalResult() throws Exception {
+        RequestCard request = requests.create("1");
+        worker.runOnce();
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+
+        mvc.perform(get("/api/requests/{id}", request.id()).with(asUser(users, NORTH_OPERATOR_LOGIN)))
+                .andExpect(jsonPath("$.reconciliations[0].localResult").value(nullValue()))
+                .andExpect(jsonPath("$.problems[0].kind").value("EXTERNAL_MISSING"))
+                .andExpect(jsonPath("$.problems[0].ourSide.result").value(nullValue()))
+                .andExpect(jsonPath("$.problems[0].ourSide").exists());
+    }
+
+    @Test
+    void problemWithoutSnapshotHasNoOurSide() throws Exception {
+        RequestCard request = withOurResult();
+        UUID delivery = open(ProblemKind.DELIVERY_UNKNOWN, request, START.plusSeconds(10));
+        UUID old = ids.newId();
+        jdbc.sql("""
+                        INSERT INTO problem (id, kind, status, request_id, details, opened_at, our_recorded)
+                        VALUES (:id, 'EXTERNAL_MISSING', 'OPEN', :request, 'opened before V12', :at, false)""")
+                .param("id", old)
+                .param("request", request.id())
+                .param("at", java.time.OffsetDateTime.of(2026, 11, 12, 9, 0, 20, 0, java.time.ZoneOffset.UTC))
+                .update();
+
+        for (UUID id : List.of(delivery, old)) {
+            mvc.perform(get("/api/problems/{id}", id).with(asUser(users, NORTH_OPERATOR_LOGIN)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.ourSide").value(nullValue()));
+        }
     }
 
     @Test

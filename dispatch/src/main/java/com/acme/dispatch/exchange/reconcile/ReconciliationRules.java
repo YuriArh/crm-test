@@ -1,6 +1,5 @@
 package com.acme.dispatch.exchange.reconcile;
 
-import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumSet;
@@ -146,14 +145,6 @@ public final class ReconciliationRules {
         Duration doubled = Duration.between(previous.reconciledAt(), previous.nextAt()).multipliedBy(2);
         Duration pause = doubled.compareTo(max) > 0 ? max : doubled.compareTo(base) < 0 ? base : doubled;
         return now.plus(pause);
-    }
-
-    /** A request's result in the canonical form of {@link ResultMessage#content()}; {@code null} if not final. */
-    public static String localContent(String businessStatus, String trackingNumber, BigDecimal price, String reason) {
-        if (!"SUCCEEDED".equals(businessStatus) && !"REJECTED".equals(businessStatus)) {
-            return null;
-        }
-        return ResultMessage.content(businessStatus, trackingNumber, price, reason);
     }
 
     /**

@@ -100,7 +100,7 @@ export function ResolveModal({ problem, decision, onClose }: Props) {
           <Text size="sm">
             {[CONSEQUENCES[decision], KIND_CONSEQUENCES[problem.kind]?.[decision]].filter(Boolean).join(' ')}
           </Text>
-          {CONFLICTS.has(problem.kind) && <ConflictView message={problem.message} current={problem.currentResult} />}
+          {CONFLICTS.has(problem.kind) && <ConflictView problem={problem} />}
           <Textarea
             label="Комментарий"
             description={`Основание решения, до ${COMMENT_MAX} символов`}

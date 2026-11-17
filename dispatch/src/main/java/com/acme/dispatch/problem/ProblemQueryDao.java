@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import com.acme.dispatch.auth.CurrentUser;
+import com.acme.dispatch.exchange.ResultSnapshot;
 import com.acme.dispatch.exchange.inbox.ResultMessage;
 import com.acme.dispatch.exchange.inbox.SafeText;
 import com.acme.dispatch.request.BusinessResult;
@@ -47,6 +48,7 @@ public class ProblemQueryDao {
                    p.reconciliation_id, rc.carrier_result_status, rc.carrier_tracking_number, rc.carrier_price,
                    rc.carrier_reason, rc.carrier_sequence, rc.carrier_message_id, rc.carrier_occurred_at,
                    rc.carrier_response,
+                   p.our_recorded, p.our_status, p.our_tracking_number, p.our_price, p.our_reason,
                    p.resolved_by, u.display_name AS resolved_by_name
               FROM problem p
               LEFT JOIN delivery_request r ON r.id = p.request_id
@@ -143,6 +145,7 @@ public class ProblemQueryDao {
                 rs.getObject("operation_id", UUID.class),
                 message,
                 SHOW_CURRENT_RESULT.contains(kind) ? currentResult(rs) : null,
+                ourSide(rs),
                 resolvedBy == null ? null : new PersonRef(resolvedBy, rs.getString("resolved_by_name")),
                 decision == null ? null : ProblemDecision.valueOf(decision),
                 rs.getString("comment"),
@@ -193,6 +196,16 @@ public class ProblemQueryDao {
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    /** The snapshot of our result kept when the problem was opened; {@code null} when none was kept. */
+    private static ExchangeProblem.OurSide ourSide(ResultSet rs) throws SQLException {
+        if (!rs.getBoolean("our_recorded")) {
+            return null;
+        }
+        String status = rs.getString("our_status");
+        return new ExchangeProblem.OurSide(status == null ? null : new ResultSnapshot(status,
+                rs.getString("our_tracking_number"), rs.getBigDecimal("our_price"), rs.getString("our_reason")));
     }
 
     private static ExchangeProblem.CurrentResult currentResult(ResultSet rs) throws SQLException {

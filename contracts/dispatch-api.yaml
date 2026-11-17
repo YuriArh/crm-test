@@ -981,6 +981,11 @@ components:
             performedBy: null
             outcome: MATCH
             acknowledged: false
+            localResult:
+              status: SUCCEEDED
+              trackingNumber: TRK-3F1C2B4D
+              price: 612.5
+              reason: null
             carrierState: EXECUTED
             carrierResult:
               status: SUCCEEDED
@@ -1002,6 +1007,7 @@ components:
           displayName: Оператор (Север)
         outcome: EXTERNAL_AHEAD
         acknowledged: false
+        localResult: null
         carrierState: EXECUTED
         carrierResult:
           status: SUCCEEDED
@@ -1043,6 +1049,12 @@ components:
                 price: 612.5
                 rejectionReason: null
                 resultAt: '2026-11-12T09:15:09Z'
+            ourSide:
+              result:
+                status: SUCCEEDED
+                trackingNumber: TRK-3F1C2B4D
+                price: 612.5
+                reason: null
             resolvedBy: null
             decision: null
             comment: null
@@ -1487,10 +1499,36 @@ components:
             - $ref: '#/components/schemas/BusinessResult'
             - type: 'null'
 
+    ResultSnapshot:
+      type: object
+      description: A final result as it was at some moment.
+      required: [status, trackingNumber, price, reason]
+      properties:
+        status:
+          type: string
+          enum: [SUCCEEDED, REJECTED]
+        trackingNumber:
+          type: [string, 'null']
+        price:
+          type: [number, 'null']
+        reason:
+          type: [string, 'null']
+
+    OurSide:
+      type: object
+      description: Our side of a problem as it was then.
+      required: [result]
+      properties:
+        result:
+          description: Our final result; `null` when we had none.
+          oneOf:
+            - $ref: '#/components/schemas/ResultSnapshot'
+            - type: 'null'
+
     ExchangeProblem:
       type: object
       required: [id, kind, status, details, openedAt, resolvedAt, request, operationId, message, currentResult,
-                 resolvedBy, decision, comment, actions]
+                 ourSide, resolvedBy, decision, comment, actions]
       properties:
         id:
           type: string
@@ -1525,9 +1563,19 @@ components:
             - $ref: '#/components/schemas/ProblemMessage'
             - type: 'null'
         currentResult:
-          description: For `RESULT_CONFLICT`, `RECONCILIATION_CONFLICT` and `EXTERNAL_MISSING`; otherwise `null`.
+          description: |
+            For `RESULT_CONFLICT`, `RECONCILIATION_CONFLICT` and `EXTERNAL_MISSING`; otherwise `null`. The request's
+            result now: after a decision it may already be the carrier's. Compare the carrier's side with `ourSide`.
           oneOf:
             - $ref: '#/components/schemas/CurrentResult'
+            - type: 'null'
+        ourSide:
+          description: |
+            Our result when the problem was opened (for `RECONCILIATION_CONFLICT`: at its latest check while it is
+            open), kept as history and never changed after it is closed. `null` when the kind has no two sides or
+            the problem is older than this snapshot.
+          oneOf:
+            - $ref: '#/components/schemas/OurSide'
             - type: 'null'
         resolvedBy:
           description: The operator who closed it; `null` while open or when the system closed it.
@@ -1563,7 +1611,8 @@ components:
     Reconciliation:
       type: object
       description: One reconciliation check of a request's operation with the carrier.
-      required: [id, checkedAt, trigger, performedBy, outcome, acknowledged, carrierState, carrierResult, details]
+      required: [id, checkedAt, trigger, performedBy, outcome, acknowledged, localResult, carrierState, carrierResult,
+                 details]
       properties:
         id:
           type: string
@@ -1590,6 +1639,11 @@ components:
         acknowledged:
           type: boolean
           description: Whether this check confirmed the delivery.
+        localResult:
+          description: Our final result when the check was decided; `null` when we had none.
+          oneOf:
+            - $ref: '#/components/schemas/ResultSnapshot'
+            - type: 'null'
         carrierState:
           description: What the carrier said about the operation; `null` when it did not answer.
           oneOf:

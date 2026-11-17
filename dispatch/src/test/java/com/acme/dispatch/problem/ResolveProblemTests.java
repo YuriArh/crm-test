@@ -28,6 +28,7 @@ import com.acme.dispatch.exchange.inbox.InboxProcessor;
 import com.acme.dispatch.request.RequestCard;
 import com.acme.dispatch.support.IntegrationTest;
 import com.acme.dispatch.support.MutableClock;
+import com.acme.dispatch.support.OurSide;
 import com.acme.dispatch.support.TestRequests;
 import com.acme.dispatch.support.TestResults;
 import com.acme.dispatch.support.TestRows;
@@ -100,7 +101,10 @@ class ResolveProblemTests {
         resolve(conflict.problem(), "APPLY_CARRIER", "The carrier confirmed the new number", "k-1")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.decision").value("APPLY_CARRIER"))
-                .andExpect(jsonPath("$.currentResult.result.trackingNumber").value("TRK-00000002"));
+                .andExpect(jsonPath("$.currentResult.result.trackingNumber").value("TRK-00000002"))
+                .andExpect(jsonPath("$.message.trackingNumber").value("TRK-00000002"))
+                .andExpect(jsonPath("$.ourSide.result.trackingNumber").value("TRK-00000001"))
+                .andExpect(jsonPath("$.ourSide.result.price").value(325.0));
 
         assertThat(result(conflict.request())).isEqualTo("SUCCEEDED|TRK-00000002|400.00|2");
         assertThat(jdbc.sql("""
@@ -109,6 +113,8 @@ class ResolveProblemTests {
                 .param("id", conflict.request().id())
                 .query(String.class).single()).isEqualTo("2|" + conflict.record());
         assertThat(results.status(conflict.record())).as("the outcome of processing is history").isEqualTo("CONFLICT");
+        assertThat(OurSide.of(jdbc, conflict.problem())).as("our result before the decision")
+                .isEqualTo("SUCCEEDED/TRK-00000001/325.00/-");
     }
 
     @Test
@@ -168,8 +174,8 @@ class ResolveProblemTests {
         Conflict conflict = conflict();
         UUID delivery = UUID.randomUUID();
         jdbc.sql("""
-                        INSERT INTO problem (id, kind, status, request_id, details, opened_at)
-                        VALUES (:id, 'DELIVERY_FAILED', 'OPEN', :request, 'HTTP 400', now())""")
+                        INSERT INTO problem (id, kind, status, request_id, details, opened_at, our_recorded)
+                        VALUES (:id, 'DELIVERY_FAILED', 'OPEN', :request, 'HTTP 400', now(), false)""")
                 .param("id", delivery)
                 .param("request", conflict.request().id())
                 .update();

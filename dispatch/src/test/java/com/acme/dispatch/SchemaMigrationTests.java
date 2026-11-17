@@ -42,7 +42,101 @@ class SchemaMigrationTests {
     @Test
     void allMigrationsAreApplied() {
         assertThat(Arrays.stream(flyway.info().applied()).map(MigrationInfo::getVersion).map(Object::toString))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12");
+    }
+
+    @Test
+    void twoSidedProblemKeepsOurResult() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        insertProblemWithOurSide("EXTERNAL_MISSING", request, true, "SUCCEEDED", "TRK-00000001",
+                new BigDecimal("612.50"), null);
+
+        assertThat(count("SELECT count(*) FROM problem WHERE our_recorded AND our_status = 'SUCCEEDED'"))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void twoSidedProblemMayRecordThatWeHadNoResult() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        insertProblemWithOurSide("EXTERNAL_MISSING", request, true, null, null, null, null);
+
+        assertThat(count("SELECT count(*) FROM problem WHERE our_recorded AND our_status IS NULL")).isEqualTo(1);
+    }
+
+    @Test
+    void problemOurStatusMustBeKnown() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertProblemWithOurSide("EXTERNAL_MISSING", request, true, "DONE", null, null,
+                null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_our_status_valid");
+    }
+
+    @Test
+    void problemOurSucceededNeedsPrice() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertProblemWithOurSide("EXTERNAL_MISSING", request, true, "SUCCEEDED",
+                "TRK-00000001", null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_our_result_complete");
+    }
+
+    @Test
+    void problemOurRejectedNeedsReason() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertProblemWithOurSide("EXTERNAL_MISSING", request, true, "REJECTED", null, null,
+                null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_our_result_complete");
+    }
+
+    @Test
+    void problemOurFieldsNeedStatus() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertProblemWithOurSide("EXTERNAL_MISSING", request, true, null, "TRK-00000001",
+                null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_our_result_complete");
+    }
+
+    @Test
+    void problemOurSideNeedsRecord() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertProblemWithOurSide("EXTERNAL_MISSING", request, false, "REJECTED", null,
+                null, "No"))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_our_side_needs_record");
+    }
+
+    @Test
+    void problemOurSideMatchesKind() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> insertProblemWithOurSide("DELIVERY_FAILED", request, true, null, null, null, null))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("problem_our_side_matches_kind");
+    }
+
+    @Test
+    void ourRecordedIsRequired() {
+        UUID request = insertRequest(NORTH, NORTH_INITIATOR, null, BigDecimal.ONE);
+
+        assertThatThrownBy(() -> jdbc.sql("""
+                        INSERT INTO problem (id, kind, status, request_id, details, opened_at)
+                        VALUES (:id, 'DELIVERY_FAILED', 'OPEN', :request, 'why', :now)""")
+                .param("id", UUID.randomUUID())
+                .param("request", request)
+                .param("now", NOW)
+                .update())
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("our_recorded");
     }
 
     @Test
@@ -535,9 +629,9 @@ class SchemaMigrationTests {
         UUID id = UUID.randomUUID();
         jdbc.sql("""
                         INSERT INTO problem (id, kind, status, request_id, inbox_id, details, opened_at, resolved_at,
-                                             resolved_by, decision, comment)
+                                             resolved_by, decision, comment, our_recorded)
                         VALUES (:id, :kind, :status, :request, :inbox, 'why', :now, :resolvedAt, :resolvedBy,
-                                :decision, :comment)""")
+                                :decision, :comment, false)""")
                 .param("id", id)
                 .param("kind", kind)
                 .param("status", status)
@@ -550,6 +644,25 @@ class SchemaMigrationTests {
                 .param("comment", comment)
                 .update();
         return id;
+    }
+
+    private void insertProblemWithOurSide(String kind, UUID requestId, boolean recorded, String status,
+                                          String tracking, BigDecimal price, String reason) {
+        jdbc.sql("""
+                        INSERT INTO problem (id, kind, status, request_id, details, opened_at, our_recorded,
+                                             our_status, our_tracking_number, our_price, our_reason)
+                        VALUES (:id, :kind, 'OPEN', :request, 'why', :now, :recorded, :ourStatus, :tracking, :price,
+                                :reason)""")
+                .param("id", UUID.randomUUID())
+                .param("kind", kind)
+                .param("request", requestId)
+                .param("now", NOW)
+                .param("recorded", recorded)
+                .param("ourStatus", status)
+                .param("tracking", tracking)
+                .param("price", price)
+                .param("reason", reason)
+                .update();
     }
 
     private long count(String sql) {

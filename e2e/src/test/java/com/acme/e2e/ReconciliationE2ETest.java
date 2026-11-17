@@ -6,6 +6,7 @@ import static com.acme.e2e.E2eClient.idempotencyKey;
 import static com.acme.e2e.E2eClient.newKey;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -21,15 +22,19 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Reconciliation on the running stack ({@code docs/specs/reconciliation.md} §3): «Сверить сейчас» takes over a result
- * the carrier has not published in its feed yet, finds nothing to fix on a finished request, and is an operator's
- * action only.
+ * the carrier has not published in its feed yet, finds nothing to fix on a finished request, keeps both sides of a
+ * conflict after the operator's decision ({@code docs/specs/conflict-history.md}), and is an operator's action only.
  */
 class ReconciliationE2ETest {
 
     static final String DEADLINE = LocalDate.now(ZoneId.of("Europe/Moscow")).plusDays(7).toString();
     static final Duration TIMEOUT = Duration.ofSeconds(90);
 
+    /** The carrier's new result; the emulator never makes this number up for a short run. */
+    static final String CARRIER_TRACKING = "TRK-FFFFFFFF";
+
     final CarrierClient carrier = new CarrierClient();
+    final CarrierDatabase carrierDatabase = new CarrierDatabase();
     final E2eClient initiator = E2eClient.signedInAs("north.initiator");
     final E2eClient operator = E2eClient.signedInAs("north.operator");
 
@@ -97,6 +102,44 @@ class ReconciliationE2ETest {
         assertThat(card.get("actions").valueStream().map(JsonNode::asString)).contains("RECONCILE");
     }
 
+    /**
+     * The carrier changed its result; after «Принять версию перевозчика» the request has the carrier's result, but the
+     * problem and the check still show what differed ({@code docs/specs/conflict-history.md}).
+     */
+    @Test
+    void appliedConflictKeepsBothSides() {
+        Conflict conflict = conflict("conflict applied");
+
+        E2eClient.Response resolved = resolve(conflict.problemId(), "APPLY_CARRIER");
+
+        assertThat(resolved.status()).isEqualTo(200);
+        JsonNode card = operator.get("/api/requests/" + conflict.requestId()).body();
+        assertThat(card.get("result").get("trackingNumber").asString()).isEqualTo(CARRIER_TRACKING);
+        JsonNode problem = problem(card, conflict.problemId());
+        assertThat(problem.get("currentResult").get("result").get("trackingNumber").asString())
+                .isEqualTo(CARRIER_TRACKING);
+        assertThat(problem.get("message").get("trackingNumber").asString()).isEqualTo(CARRIER_TRACKING);
+        assertThat(problem.get("ourSide").get("result")).as("our result before the decision")
+                .isEqualTo(conflict.ours());
+        assertBothSidesInCheck(card, conflict);
+    }
+
+    @Test
+    void keptConflictKeepsBothSides() {
+        Conflict conflict = conflict("conflict kept");
+
+        E2eClient.Response resolved = resolve(conflict.problemId(), "KEEP_OURS");
+
+        assertThat(resolved.status()).isEqualTo(200);
+        JsonNode card = operator.get("/api/requests/" + conflict.requestId()).body();
+        JsonNode problem = problem(card, conflict.problemId());
+        assertThat(problem.get("ourSide").get("result")).isEqualTo(conflict.ours());
+        assertThat(problem.get("message").get("trackingNumber").asString()).isEqualTo(CARRIER_TRACKING);
+        assertThat(problem.get("currentResult").get("result").get("trackingNumber").asString())
+                .isNotEqualTo(CARRIER_TRACKING);
+        assertBothSidesInCheck(card, conflict);
+    }
+
     @Test
     void initiatorCannotReconcile() {
         String id = create(uniqueCargo("reconcile access"));
@@ -104,6 +147,55 @@ class ReconciliationE2ETest {
         assertThat(initiator.post("/api/requests/" + id + "/reconcile", null, idempotencyKey(newKey())).status())
                 .isEqualTo(403);
         assertThat(initiator.get("/api/requests/" + id).body().has("reconciliations")).isFalse();
+    }
+
+    /** A finished request whose result the carrier then changed, checked by «Сверить сейчас»: a conflict is open. */
+    private Conflict conflict(String what) {
+        String id = create(uniqueCargo(what));
+        JsonNode finished = Awaits.finalCard(operator, id);
+        String operationId = finished.get("operationId").asString();
+        assertThat(finished.path("result").path("trackingNumber").asString("")).isNotEqualTo(CARRIER_TRACKING);
+        carrierDatabase.changeResult(operationId, CARRIER_TRACKING, new BigDecimal("999.00"));
+
+        E2eClient.Response reconciled = operator.post("/api/requests/" + id + "/reconcile", null,
+                idempotencyKey(newKey()));
+
+        assertThat(reconciled.status()).isEqualTo(200);
+        assertThat(reconciled.body().get("outcome").asString()).isEqualTo("CONFLICT");
+        JsonNode ours = reconciled.body().get("localResult");
+        assertThat(ours.get("status").asString()).isEqualTo(finished.get("businessStatus").asString());
+        JsonNode card = operator.get("/api/requests/" + id).body();
+        JsonNode open = card.get("problems").valueStream()
+                .filter(p -> p.get("kind").asString().equals("RECONCILIATION_CONFLICT"))
+                .filter(p -> p.get("status").asString().equals("OPEN"))
+                .findFirst().orElseThrow();
+        return new Conflict(id, open.get("id").asString(), reconciled.body().get("id").asString(), ours);
+    }
+
+    private E2eClient.Response resolve(String problemId, String decision) {
+        return operator.post("/api/problems/" + problemId + "/resolve",
+                Map.of("decision", decision, "comment", "e2e: checked with the carrier"), idempotencyKey(newKey()));
+    }
+
+    private static JsonNode problem(JsonNode card, String problemId) {
+        return card.get("problems").valueStream().filter(p -> p.get("id").asString().equals(problemId))
+                .findFirst().orElseThrow();
+    }
+
+    /** The check that found the conflict keeps both sides, whatever was decided after it. */
+    private static void assertBothSidesInCheck(JsonNode card, Conflict conflict) {
+        JsonNode check = card.get("reconciliations").valueStream()
+                .filter(c -> c.get("id").asString().equals(conflict.checkId()))
+                .findFirst().orElseThrow();
+        assertThat(check.get("localResult")).isEqualTo(conflict.ours());
+        assertThat(check.get("carrierResult").get("trackingNumber").asString()).isEqualTo(CARRIER_TRACKING);
+        assertThat(check.get("carrierResult").get("price").decimalValue()).isEqualByComparingTo("999.00");
+    }
+
+    /**
+     * @param ours our result at the check, as {@code localResult}
+     */
+    private record Conflict(String requestId, String problemId, String checkId, JsonNode ours) {
     }
 
     private String create(String cargo) {

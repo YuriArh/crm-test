@@ -21,6 +21,7 @@ import com.acme.dispatch.request.RequestCard;
 import com.acme.dispatch.support.FakeCarrier;
 import com.acme.dispatch.support.IntegrationTest;
 import com.acme.dispatch.support.MutableClock;
+import com.acme.dispatch.support.OurSide;
 import com.acme.dispatch.support.TestFeed;
 import com.acme.dispatch.support.TestRequests;
 import com.acme.dispatch.support.TestResults;
@@ -126,6 +127,28 @@ class MessageProblemsTests {
     }
 
     @Test
+    void resultConflictRecordsOurResult() {
+        RequestCard request = requests.create("1");
+        results.deliver(succeeded(1, request.operationId(), "TRK-00000001", "325.00"));
+        UUID record = results.receive(succeeded(2, request.operationId(), "TRK-00000002", "400.00")).orElseThrow();
+        processor.processDue();
+
+        assertThat(OurSide.of(jdbc, problemIdOf(record))).isEqualTo("SUCCEEDED/TRK-00000001/325.00/-");
+    }
+
+    @Test
+    void messageProblemsHaveNoOurSide() {
+        RequestCard request = requests.create("1");
+        UUID known = results.receive(entry(1, UUID.randomUUID().toString(), request.operationId(), 2, "SUCCEEDED",
+                "TRK-00000001", "-1.00", null)).orElseThrow();
+        UUID unknown = results.receive(succeeded(2, UUID.randomUUID(), "TRK-00000001", "325.00")).orElseThrow();
+        processor.processDue();
+
+        assertThat(OurSide.of(jdbc, problemIdOf(known))).isEqualTo(OurSide.NOT_RECORDED);
+        assertThat(OurSide.of(jdbc, problemIdOf(unknown))).isEqualTo(OurSide.NOT_RECORDED);
+    }
+
+    @Test
     void duplicateOpensNothing() {
         RequestCard request = requests.create("1");
         var invalid = entry(1, "m-1", request.operationId(), 2, "SUCCEEDED", "TRK-00000001", "-1.00", null);
@@ -196,6 +219,10 @@ class MessageProblemsTests {
                 .param("id", record)
                 .query(String.class)
                 .single();
+    }
+
+    private UUID problemIdOf(UUID record) {
+        return jdbc.sql("SELECT id FROM problem WHERE inbox_id = :id").param("id", record).query(UUID.class).single();
     }
 
     private List<String> deliveryProblems(RequestCard request) {

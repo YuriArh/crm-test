@@ -20,6 +20,7 @@ import java.util.UUID;
 
 import com.acme.dispatch.carrier.LookupResult;
 import com.acme.dispatch.exchange.DeliveryStatus;
+import com.acme.dispatch.exchange.ResultSnapshot;
 import com.acme.dispatch.exchange.reconcile.ReconciliationRules.CarrierAnswer;
 import com.acme.dispatch.exchange.reconcile.ReconciliationRules.Local;
 import com.acme.dispatch.exchange.reconcile.ReconciliationRules.Previous;
@@ -36,8 +37,8 @@ class ReconciliationRulesTest {
 
     static final UUID OPERATION = UUID.fromString("0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f");
     static final JsonMapper JSON = JsonMapper.builder().build();
-    static final String OURS = ReconciliationRules.localContent("SUCCEEDED", "TRK-00000001", new BigDecimal("612.50"),
-            null);
+    static final String OURS = ResultSnapshot.of("SUCCEEDED", "TRK-00000001", new BigDecimal("612.50"), null)
+            .content();
     static final Instant NOW = Instant.parse("2026-11-12T10:00:00Z");
     static final Duration BASE = Duration.ofMinutes(5);
     static final Duration MAX = Duration.ofHours(1);
@@ -105,7 +106,7 @@ class ReconciliationRulesTest {
 
     @Test
     void rejectedWithDifferentReasonIsConflict() {
-        String ours = ReconciliationRules.localContent("REJECTED", null, null, "Too heavy");
+        String ours = ResultSnapshot.of("REJECTED", null, null, "Too heavy").content();
         assertThat(decide(ACKNOWLEDGED, ours, executed(rejected("Wrong address")))).isEqualTo(CONFLICT);
         assertThat(decide(ACKNOWLEDGED, ours, executed(rejected("Too heavy")))).isEqualTo(MATCH);
     }
@@ -207,9 +208,7 @@ class ReconciliationRulesTest {
     }
 
     @Test
-    void localContentIsEmptyWithoutFinalResult() {
-        assertThat(ReconciliationRules.localContent("IN_PROGRESS", null, null, null)).isNull();
-        assertThat(ReconciliationRules.localContent("AWAITING", null, null, null)).isNull();
+    void localContentIsTheCanonicalForm() {
         assertThat(OURS).isEqualTo("SUCCEEDED|TRK-00000001|612.5|");
     }
 

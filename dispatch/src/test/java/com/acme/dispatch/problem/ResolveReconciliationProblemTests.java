@@ -26,6 +26,7 @@ import com.acme.dispatch.request.RequestCard;
 import com.acme.dispatch.support.FakeCarrier;
 import com.acme.dispatch.support.IntegrationTest;
 import com.acme.dispatch.support.MutableClock;
+import com.acme.dispatch.support.OurSide;
 import com.acme.dispatch.support.TestRequests;
 import com.acme.dispatch.support.TestResults;
 import com.acme.dispatch.support.TestRows;
@@ -97,6 +98,16 @@ class ResolveReconciliationProblemTests {
                          WHERE i.source = 'RECONCILIATION' AND i.message_id = :messageId""")
                 .param("id", request.id()).param("messageId", messageId).query(String.class).single())
                 .isEqualTo("APPLIED|Applied by operator decision " + problem + "|true");
+        assertThat(OurSide.of(jdbc, problem)).as("our result before the decision")
+                .isEqualTo("SUCCEEDED/TRK-00000001/612.50/-");
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/api/requests/{id}", request.id()).with(asUser(users, NORTH_OPERATOR_LOGIN)))
+                .andExpect(jsonPath("$.problems[0].currentResult.result.trackingNumber").value("TRK-00000002"))
+                .andExpect(jsonPath("$.problems[0].message.trackingNumber").value("TRK-00000002"))
+                .andExpect(jsonPath("$.problems[0].ourSide.result.trackingNumber").value("TRK-00000001"))
+                .andExpect(jsonPath("$.problems[0].ourSide.result.price").value(612.5))
+                .andExpect(jsonPath("$.reconciliations[0].localResult.trackingNumber").value("TRK-00000001"))
+                .andExpect(jsonPath("$.reconciliations[0].carrierResult.trackingNumber").value("TRK-00000002"));
     }
 
     @Test

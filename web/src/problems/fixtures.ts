@@ -1,8 +1,12 @@
 // Test data of the problems module (imported by *.test.tsx only): one problem of every kind, as dispatch sends it.
-import type { ExchangeProblem, ExchangeProblemPage } from '@/shared/api';
+import type { ExchangeProblem, ExchangeProblemPage, OurSide } from '@/shared/api';
 
 export const REQUEST_REF = { id: '0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60', number: 'DR-000123' };
 export const OPERATION_ID = '0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e6f';
+/** Our result when a conflict was found: the same as the request's result while it is open. */
+export const OUR_RESULT: OurSide = {
+  result: { status: 'SUCCEEDED', trackingNumber: 'TRK-00000001', price: 325, reason: null },
+};
 
 let sequence = 0;
 
@@ -19,6 +23,7 @@ function base(overrides: Partial<ExchangeProblem>): ExchangeProblem {
     operationId: OPERATION_ID,
     message: null,
     currentResult: null,
+    ourSide: null,
     resolvedBy: null,
     decision: null,
     comment: null,
@@ -99,6 +104,7 @@ export function resultConflict(overrides: Partial<ExchangeProblem> = {}): Exchan
       businessStatus: 'SUCCEEDED',
       result: { trackingNumber: 'TRK-00000001', price: 325, rejectionReason: null, resultAt: '2026-11-17T11:00:00Z' },
     },
+    ourSide: OUR_RESULT,
     actions: ['APPLY_CARRIER', 'KEEP_OURS'],
     ...overrides,
   });
@@ -124,6 +130,7 @@ export function reconciliationConflict(overrides: Partial<ExchangeProblem> = {})
       businessStatus: 'SUCCEEDED',
       result: { trackingNumber: 'TRK-00000001', price: 325, rejectionReason: null, resultAt: '2026-11-17T11:00:00Z' },
     },
+    ourSide: OUR_RESULT,
     actions: ['APPLY_CARRIER', 'KEEP_OURS'],
     ...overrides,
   });
@@ -131,7 +138,12 @@ export function reconciliationConflict(overrides: Partial<ExchangeProblem> = {})
 
 /** Reconciliation: the carrier does not know an operation it acknowledged; we have no result, so a retry fixes it. */
 export function externalMissing(overrides: Partial<ExchangeProblem> = {}): ExchangeProblem {
-  return base({ kind: 'EXTERNAL_MISSING', details: 'The carrier answered 404 for an acknowledged operation', ...overrides });
+  return base({
+    kind: 'EXTERNAL_MISSING',
+    details: 'The carrier answered 404 for an acknowledged operation',
+    ourSide: { result: null },
+    ...overrides,
+  });
 }
 
 /** Closed by an operator. */

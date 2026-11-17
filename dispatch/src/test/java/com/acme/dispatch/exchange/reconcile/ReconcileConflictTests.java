@@ -16,6 +16,7 @@ import com.acme.dispatch.request.RequestCard;
 import com.acme.dispatch.support.FakeCarrier;
 import com.acme.dispatch.support.IntegrationTest;
 import com.acme.dispatch.support.MutableClock;
+import com.acme.dispatch.support.OurSide;
 import com.acme.dispatch.support.TestRequests;
 import com.acme.dispatch.support.TestResults;
 import com.acme.dispatch.support.TestRows;
@@ -73,6 +74,80 @@ class ReconcileConflictTests {
         assertThat(problems(request)).containsExactly("RECONCILIATION_CONFLICT:OPEN:-");
         assertThat(linkedRow(request)).isEqualTo(checked.reconciliationId());
         assertThat(result(request)).as("nothing changed").isEqualTo("SUCCEEDED/612.50/1");
+    }
+
+    @Test
+    void conflictRecordsOurResult() {
+        RequestCard request = withOurResult();
+        carrierHas(request, "700.00");
+
+        check(request);
+
+        assertThat(OurSide.of(jdbc, openProblem(request))).isEqualTo("SUCCEEDED/TRK-00000001/612.50/-");
+    }
+
+    @Test
+    void relinkUpdatesOurSideWithRow() {
+        RequestCard request = withOurResult();
+        carrierHas(request, "700.00");
+        check(request);
+        jdbc.sql("UPDATE delivery_request SET price = 650.00, version = version + 1 WHERE id = :id")
+                .param("id", request.id()).update();
+        clock.advance(Duration.ofMinutes(5));
+
+        Reconciler.Checked second = check(request);
+
+        assertThat(linkedRow(request)).isEqualTo(second.reconciliationId());
+        assertThat(OurSide.of(jdbc, openProblem(request))).as("both sides of the same check")
+                .isEqualTo("SUCCEEDED/TRK-00000001/650.00/-");
+    }
+
+    @Test
+    void snapshotStaysAfterKeepOurs() {
+        RequestCard request = withOurResult();
+        carrierHas(request, "700.00");
+        check(request);
+        UUID problem = keepOurs(request);
+        jdbc.sql("UPDATE delivery_request SET price = 650.00, version = version + 1 WHERE id = :id")
+                .param("id", request.id()).update();
+        clock.advance(Duration.ofMinutes(5));
+
+        check(request);
+
+        assertThat(OurSide.of(jdbc, problem)).as("a closed problem is history")
+                .isEqualTo("SUCCEEDED/TRK-00000001/612.50/-");
+        assertThat(jdbc.sql("SELECT reconciliation_id FROM problem WHERE id = :id").param("id", problem)
+                .query(UUID.class).single()).isNotEqualTo(linkedRow(request));
+    }
+
+    @Test
+    void conflictRowKeepsBothSides() {
+        RequestCard request = withOurResult();
+        carrierHas(request, "700.00");
+
+        check(request);
+
+        assertThat(sides(request)).isEqualTo("ours SUCCEEDED/TRK-00000001/612.50/- carrier SUCCEEDED/TRK-00000001/700.00/-");
+    }
+
+    @Test
+    void carrierWithoutResultRowKeepsOurSide() {
+        RequestCard request = withOurResult();
+        carrier.lookupAnswer(request.operationId(), FakeCarrier.accepted(request.operationId()));
+
+        check(request);
+
+        assertThat(sides(request)).isEqualTo("ours SUCCEEDED/TRK-00000001/612.50/- carrier -/-/-/-");
+    }
+
+    @Test
+    void matchRowKeepsEqualSides() {
+        RequestCard request = withOurResult();
+        carrierHas(request, "612.50");
+
+        assertThat(check(request).outcome()).isEqualTo(ReconciliationOutcome.MATCH);
+
+        assertThat(sides(request)).isEqualTo("ours SUCCEEDED/TRK-00000001/612.50/- carrier SUCCEEDED/TRK-00000001/612.50/-");
     }
 
     @Test
@@ -187,6 +262,11 @@ class ReconcileConflictTests {
         return problem;
     }
 
+    private UUID openProblem(RequestCard request) {
+        return jdbc.sql("SELECT id FROM problem WHERE request_id = :id AND status = 'OPEN'")
+                .param("id", request.id()).query(UUID.class).single();
+    }
+
     private UUID linkedRow(RequestCard request) {
         return jdbc.sql("SELECT reconciliation_id FROM problem WHERE request_id = :id AND status = 'OPEN'")
                 .param("id", request.id()).query(UUID.class).single();
@@ -195,6 +275,19 @@ class ReconcileConflictTests {
     private String lastDetails(RequestCard request) {
         return jdbc.sql("""
                         SELECT details FROM reconciliation WHERE request_id = :id
+                         ORDER BY checked_at DESC, id DESC LIMIT 1""")
+                .param("id", request.id()).query(String.class).single();
+    }
+
+    /** Both sides of the request's newest check, as {@code ours S/T/P/R carrier S/T/P/R}. */
+    private String sides(RequestCard request) {
+        return jdbc.sql("""
+                        SELECT 'ours ' || coalesce(local_status, '-') || '/' || coalesce(local_tracking_number, '-')
+                               || '/' || coalesce(local_price::text, '-') || '/' || coalesce(local_reason, '-')
+                               || ' carrier ' || coalesce(carrier_result_status, '-')
+                               || '/' || coalesce(carrier_tracking_number, '-')
+                               || '/' || coalesce(carrier_price::text, '-') || '/' || coalesce(carrier_reason, '-')
+                          FROM reconciliation WHERE request_id = :id
                          ORDER BY checked_at DESC, id DESC LIMIT 1""")
                 .param("id", request.id()).query(String.class).single();
     }

@@ -11,6 +11,10 @@ REDOCLY_IMAGE := redocly/cli:1.34.3
 
 E2E_BASE_URL ?= http://localhost:$(or $(DISPATCH_PORT),8080)
 CARRIER_BASE_URL ?= http://localhost:$(or $(CARRIER_PORT),8081)
+# The emulator's database, for tests in which the carrier changes its own data (docs/specs/demo-seed.md §8).
+CARRIER_DB_URL ?= jdbc:postgresql://localhost:$(or $(DB_PORT),5432)/$(or $(CARRIER_DB_NAME),carrier)
+CARRIER_DB_ENV = CARRIER_DB_URL=$(CARRIER_DB_URL) CARRIER_DB_USER=$(or $(CARRIER_DB_USER),carrier) \
+	CARRIER_DB_PASSWORD=$(or $(CARRIER_DB_PASSWORD),carrier)
 WEB_BASE_URL ?= http://localhost:$(or $(WEB_PORT),3000)
 # Playwright reads WEB_BASE_URL: set only where a target passes it, otherwise it tests the dev server.
 unexport WEB_BASE_URL
@@ -55,7 +59,7 @@ wait: ## Wait until dispatch and carrier-emulator report healthy (up to 90 s eac
 	done
 
 e2e: wait ## Run end-to-end tests against the running stack (start it with make up)
-	E2E_BASE_URL=$(E2E_BASE_URL) CARRIER_BASE_URL=$(CARRIER_BASE_URL) ./gradlew :e2e:test -Pe2e
+	E2E_BASE_URL=$(E2E_BASE_URL) CARRIER_BASE_URL=$(CARRIER_BASE_URL) $(CARRIER_DB_ENV) ./gradlew :e2e:test -Pe2e
 
 # Crash and restart during the exchange (D04, D-NF01, NF03; docs/PLAN.md, stage 2, item 2). SIGKILL, not a
 # graceful stop: the process dies mid-call like a real crash. When to kill and how long to stay down is up to you.

@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.acme.dispatch.exchange.ResultSnapshot;
 import com.acme.dispatch.request.PersonRef;
 
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -19,7 +20,8 @@ public class ReconciliationQueryDao {
 
     private static final String SELECT = """
             SELECT c.id, c.checked_at, c.run_type, c.performed_by, u.display_name AS performed_by_name, c.outcome,
-                   c.acknowledged, c.carrier_state, c.carrier_result_status, c.carrier_tracking_number,
+                   c.acknowledged, c.local_status, c.local_tracking_number, c.local_price, c.local_reason,
+                   c.carrier_state, c.carrier_result_status, c.carrier_tracking_number,
                    c.carrier_price, c.carrier_reason, c.carrier_sequence, c.carrier_message_id,
                    c.carrier_occurred_at, c.details
               FROM reconciliation c
@@ -52,6 +54,7 @@ public class ReconciliationQueryDao {
     private static ReconciliationView map(ResultSet rs) throws SQLException {
         UUID performedBy = rs.getObject("performed_by", UUID.class);
         String resultStatus = rs.getString("carrier_result_status");
+        String localStatus = rs.getString("local_status");
         return new ReconciliationView(
                 rs.getObject("id", UUID.class),
                 instant(rs, "checked_at"),
@@ -59,6 +62,8 @@ public class ReconciliationQueryDao {
                 performedBy == null ? null : new PersonRef(performedBy, rs.getString("performed_by_name")),
                 ReconciliationOutcome.valueOf(rs.getString("outcome")),
                 rs.getBoolean("acknowledged"),
+                localStatus == null ? null : new ResultSnapshot(localStatus, rs.getString("local_tracking_number"),
+                        rs.getBigDecimal("local_price"), rs.getString("local_reason")),
                 rs.getString("carrier_state"),
                 resultStatus == null ? null : new ReconciliationView.CarrierResult(resultStatus,
                         rs.getString("carrier_tracking_number"), rs.getBigDecimal("carrier_price"),
