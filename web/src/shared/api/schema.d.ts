@@ -222,6 +222,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/problems/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Problem id. A malformed id answers `404`, like a missing problem. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * One problem
+         * @description Operators only, in the scope of the list: problems of the requests of the caller's service and problems of
+         *     carrier records that name no known request. A problem of another service answers `404`, like a missing one.
+         */
+        get: operations["getProblem"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/problems/{id}/resolve": {
         parameters: {
             query?: never;
@@ -964,6 +988,40 @@ export interface operations {
             400: components["responses"]["ValidationFailed"];
             401: components["responses"]["Unauthenticated"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    getProblem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Problem id. A malformed id answers `404`, like a missing problem. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The problem, the same as its item in the list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExchangeProblem"];
+                };
+            };
+            401: components["responses"]["Unauthenticated"];
+            403: components["responses"]["Forbidden"];
+            /** @description No such problem in the caller's scope. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     resolveProblem: {

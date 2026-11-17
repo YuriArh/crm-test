@@ -615,6 +615,39 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/problems/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Problem id. A malformed id answers `404`, like a missing problem.
+        schema:
+          type: string
+    get:
+      tags: [problems]
+      operationId: getProblem
+      summary: One problem
+      description: |
+        Operators only, in the scope of the list: problems of the requests of the caller's service and problems of
+        carrier records that name no known request. A problem of another service answers `404`, like a missing one.
+      responses:
+        '200':
+          description: The problem, the same as its item in the list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExchangeProblem'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No such problem in the caller's scope.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
   /api/problems/{id}/resolve:
     parameters:
       - name: id

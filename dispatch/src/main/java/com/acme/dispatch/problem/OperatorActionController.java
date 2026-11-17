@@ -44,13 +44,7 @@ class OperatorActionController {
                                             @RequestHeader(IDEMPOTENCY_KEY_HEADER) String idempotencyKey,
                                             @Valid @RequestBody ResolveProblemBody body,
                                             @AuthenticationPrincipal CurrentUser user) {
-        UUID problemId;
-        try {
-            problemId = UUID.fromString(id);
-        } catch (IllegalArgumentException e) {
-            throw ApiException.notFound("Problem " + id + " not found");
-        }
-        return respond(actions.resolve(user, problemId, idempotencyKey, body));
+        return respond(actions.resolve(user, ProblemController.problemId(id), idempotencyKey, body));
     }
 
     private static <T> ResponseEntity<T> respond(IdempotentOutcome<T> outcome) {

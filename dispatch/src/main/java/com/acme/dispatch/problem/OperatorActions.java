@@ -67,7 +67,7 @@ public class OperatorActions {
                                                       ResolveProblemBody body) {
         ProblemController.requireOperator(user);
         ExchangeProblem problem = problemQueries.find(problemId, user)
-                .orElseThrow(() -> ApiException.notFound("Problem " + problemId + " not found"));
+                .orElseThrow(() -> ProblemController.notFound(problemId));
         Map<String, Object> request = Map.of("problemId", problemId, "decision", body.decision(),
                 "comment", body.comment());
         return idempotency.execute(user.id(), idempotencyKey, RESOLVE_OPERATION, request, ExchangeProblem.class,
