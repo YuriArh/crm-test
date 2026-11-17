@@ -24,6 +24,7 @@ test('an initiator has no problems page, even by a direct link', async ({ page }
   await page.goto('/requests');
   await expect(page.getByRole('heading', { name: 'Заявки', level: 2 })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Разделы' })).toHaveCount(0);
+  await expect(page.getByRole('switch', { name: 'Есть открытые проблемы' })).toHaveCount(0);
 
   await page.goto('/problems');
   await expect(page.getByRole('heading', { name: 'Страница не найдена' })).toBeVisible();

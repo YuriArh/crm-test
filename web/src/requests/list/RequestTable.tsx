@@ -1,4 +1,4 @@
-import { Skeleton, Table, Text, Tooltip } from '@mantine/core';
+import { Group, Skeleton, Table, Text, Tooltip } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import type { RequestListItem, Role } from '@/shared/api';
@@ -6,6 +6,7 @@ import { formatInstant } from '../format';
 import { StatusBadge } from '../StatusBadge';
 import { BUSINESS_VIEWS, deliveryView } from '../statuses';
 import { Deadline } from './Deadline';
+import { OpenProblems } from './OpenProblems';
 import classes from './RequestList.module.css';
 
 type Props = { items: RequestListItem[]; role: Role; timeZone: string };
@@ -71,7 +72,10 @@ export function RequestTable({ items, role, timeZone }: Props) {
             <StatusBadge view={BUSINESS_VIEWS[item.businessStatus]} />
           </Table.Td>
           <Table.Td className={classes.badgeCell}>
-            <StatusBadge view={deliveryView(item.deliveryStatus, role)} />
+            <Group gap="xs" wrap="nowrap">
+              <StatusBadge view={deliveryView(item.deliveryStatus, role)} />
+              <OpenProblems count={item.openProblems} />
+            </Group>
           </Table.Td>
           <Table.Td>
             {item.assignee ? item.assignee.displayName : <Text span c="dimmed">—</Text>}

@@ -59,6 +59,11 @@ test('a broken carrier record is found in the problems list and acknowledged in 
   await setFaults({});
   // The header counts it among the open problems.
   await expect(page.getByRole('navigation', { name: 'Разделы' }).getByRole('link', { name: /^Проблемы, открытых: \d+$/ }).first()).toBeVisible();
+  // The registry shows it among the requests with open problems, with its count.
+  await page.goto('/requests?problems=1');
+  const registryRow = page.getByRole('row').filter({ hasText: request.number });
+  await expect(registryRow.getByLabel('Открытых проблем: 1')).toBeVisible();
+  await page.goto('/problems?kind=%5B%22INVALID_MESSAGE%22%5D');
 
   await row.getByRole('link', { name: 'Некорректное сообщение перевозчика' }).click();
   const panel = page.getByRole('dialog', { name: 'Некорректное сообщение перевозчика' });
@@ -77,6 +82,10 @@ test('a broken carrier record is found in the problems list and acknowledged in 
   // The segmented control's radio inputs are hidden; a person clicks the caption.
   await page.getByRole('radiogroup', { name: 'Статус' }).getByText('Закрытые', { exact: true }).click();
   await expect(page.getByRole('row').filter({ hasText: request.number })).toContainText('Разобрано · Оператор (Север)');
+
+  await page.goto('/requests?problems=1');
+  await expect(page.getByRole('heading', { name: 'Заявки', level: 2 })).toBeVisible();
+  await expect(page.getByRole('row').filter({ hasText: request.number })).toHaveCount(0);
 });
 
 test('a lost answer shows «unknown whether received» in the card until the system closes it', async ({ page }) => {

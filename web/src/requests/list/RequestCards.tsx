@@ -4,6 +4,7 @@ import type { RequestListItem, Role } from '@/shared/api';
 import { StatusBadge } from '../StatusBadge';
 import { BUSINESS_VIEWS, deliveryView } from '../statuses';
 import { Deadline } from './Deadline';
+import { OpenProblems } from './OpenProblems';
 import classes from './RequestList.module.css';
 
 type Props = { items: RequestListItem[]; role: Role };
@@ -33,10 +34,11 @@ export function RequestCards({ items, role }: Props) {
               )}
             </Group>
             {/* The usual state does not make noise: only a delivery that is not "received" is shown. */}
-            {item.deliveryStatus !== 'ACKNOWLEDGED' && (
-              <div>
-                <StatusBadge view={deliveryView(item.deliveryStatus, role)} />
-              </div>
+            {(item.deliveryStatus !== 'ACKNOWLEDGED' || Boolean(item.openProblems)) && (
+              <Group gap="xs" wrap="wrap">
+                {item.deliveryStatus !== 'ACKNOWLEDGED' && <StatusBadge view={deliveryView(item.deliveryStatus, role)} />}
+                <OpenProblems count={item.openProblems} />
+              </Group>
             )}
           </Stack>
         </Link>

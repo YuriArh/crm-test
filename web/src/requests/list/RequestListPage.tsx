@@ -167,7 +167,9 @@ export function RequestListPage() {
         {data && data.totalElements === 0 && !filtered && <EmptyMessage role={me.role} />}
         {data && data.totalElements === 0 && filtered && (
           <Stack align="center" gap="sm" py="xl">
-            <Text fw={510}>Ничего не найдено</Text>
+            <Text fw={510}>
+              {activeCount === 1 && search.problems ? 'Заявок с открытыми проблемами нет' : 'Ничего не найдено'}
+            </Text>
             <Button variant="default" onClick={resetFilters}>
               Сбросить фильтры
             </Button>
