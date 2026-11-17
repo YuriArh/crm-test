@@ -126,10 +126,19 @@ public class Reconciler {
                     carrierResult.messageId(), taken.note().isEmpty() ? "new" : "existing");
         }
 
+        Optional<UUID> decidedEarlier = Optional.empty();
+        if (outcome == ReconciliationOutcome.CONFLICT) {
+            decidedEarlier = problems.conflictDecidedEarlier(requestId,
+                    carrierResult == null ? null : carrierResult.content(), state.localResult());
+            if (decidedEarlier.isPresent()) {
+                details = details + "; decided earlier: problem " + decidedEarlier.get() + ", not opened again";
+            }
+        }
+
         UUID id = ids.newId();
         dao.insert(new Row(id, requestId, operationId, now, runType, performedBy, outcome, acknowledged,
                 state.delivery(), state.localResult(), carrierState, carrierResult, answer.raw(), details, inboxId));
-        act(outcome, requestId, operationId, state.delivery(), details, now);
+        act(outcome, id, requestId, operationId, state.delivery(), details, decidedEarlier.isPresent(), now);
         dao.schedule(requestId, now, ReconciliationRules.nextCheck(previous, signature, now,
                 properties.reconcilePause(), properties.reconcilePauseMax(), asked.carrierUnavailable()));
         return new Checked(id, outcome, asked.carrierUnavailable());
@@ -150,8 +159,9 @@ public class Reconciler {
         return new TakenOver(inboxId, note);
     }
 
-    private void act(ReconciliationOutcome outcome, UUID requestId, UUID operationId, DeliveryStatus delivery,
-                     String details, Instant now) {
+    /** The effects of an outcome that need the recorded check (§2.5); the operation row is still locked. */
+    private void act(ReconciliationOutcome outcome, UUID reconciliationId, UUID requestId, UUID operationId,
+                     DeliveryStatus delivery, String details, boolean decidedEarlier, Instant now) {
         switch (outcome) {
             case EXTERNAL_MISSING -> {
                 log.warn("Reconciliation EXTERNAL_MISSING for operation {}: {}", operationId, details);
@@ -161,8 +171,14 @@ public class Reconciler {
                     problems.onExternalMissing(requestId, operationId, details, now);
                 }
             }
-            case CONFLICT -> log.warn("Reconciliation CONFLICT for operation {}: {}", operationId, details);
-            case MATCH, EXTERNAL_AHEAD, ERROR -> {
+            case CONFLICT -> {
+                log.warn("Reconciliation CONFLICT for operation {}: {}", operationId, details);
+                if (!decidedEarlier) {
+                    problems.onReconciliationConflict(requestId, operationId, reconciliationId, details, now);
+                }
+            }
+            case MATCH -> problems.onReconciliationMatch(requestId, operationId, now);
+            case EXTERNAL_AHEAD, ERROR -> {
             }
         }
     }

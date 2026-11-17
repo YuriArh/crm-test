@@ -1,6 +1,7 @@
 package com.acme.dispatch.problem;
 
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -90,6 +91,43 @@ public class ProblemService {
         if (problems.open(ids.newId(), ProblemKind.EXTERNAL_MISSING, requestId, null, details, now)) {
             log.warn("Problem EXTERNAL_MISSING opened for request {} (operation {}): {}", requestId, operationId,
                     details);
+        }
+    }
+
+    /**
+     * Whether an operator already kept our result against this very answer: the request's newest reconciliation
+     * conflict is closed as {@code KEEP_OURS}, and both the carrier's result (or its absence) and ours are the same
+     * as then. Then a repeat of the conflict is recorded but not opened again. Empty while a conflict is open.
+     *
+     * @return the problem that decided it
+     */
+    public Optional<UUID> conflictDecidedEarlier(UUID requestId, String carrierContent, String localResult) {
+        return problems.lastReconciliationConflict(requestId)
+                .filter(last -> last.status() == ProblemStatus.RESOLVED && last.decision() == ProblemDecision.KEEP_OURS)
+                .filter(last -> Objects.equals(last.carrierContent(), carrierContent)
+                        && Objects.equals(last.localResult(), localResult))
+                .map(ProblemDao.LastConflict::id);
+    }
+
+    /**
+     * Reconciliation found a conflict: the open one now shows this check, or a new one opens. Nothing else changes.
+     */
+    public void onReconciliationConflict(UUID requestId, UUID operationId, UUID reconciliationId, String details,
+                                         Instant now) {
+        if (problems.relinkOpenReconciliationConflict(requestId, reconciliationId, details)) {
+            return;
+        }
+        if (problems.openReconciliationConflict(ids.newId(), requestId, reconciliationId, details, now)) {
+            log.warn("Problem RECONCILIATION_CONFLICT opened for request {} (operation {}): {}", requestId,
+                    operationId, details);
+        }
+    }
+
+    /** Reconciliation found the results equal: an open reconciliation conflict is resolved. */
+    public void onReconciliationMatch(UUID requestId, UUID operationId, Instant now) {
+        if (problems.closeBySystem(requestId, Set.of(ProblemKind.RECONCILIATION_CONFLICT), now) > 0) {
+            log.info("Closed RECONCILIATION_CONFLICT of request {} (operation {}): the results match", requestId,
+                    operationId);
         }
     }
 
