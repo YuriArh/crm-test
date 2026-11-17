@@ -69,7 +69,7 @@ make faults            # current emulator fault modes
 make fault-unavailable # switch on only one fault mode (also fault-lose-response, fault-duplicate, fault-delayed, fault-malformed)
 make inbox             # newest 30 carrier results received by dispatch: processing status, reason, attempts
 make fault-off         # switch off all fault modes
-make dispatch-kill     # crash dispatch (SIGKILL) mid-exchange; make dispatch-start brings it back (also db-kill / db-start)
+make dispatch-kill     # crash dispatch (SIGKILL) mid-exchange; make dispatch-start brings it back (also carrier-kill / carrier-start, db-kill / db-start)
 make contracts-lint    # lint contracts/ (Redocly CLI in Docker)
 make web-install       # install web/ dependencies and Chromium for Playwright (once)
 make web-dev           # web client on :5173 against dispatch on :8080

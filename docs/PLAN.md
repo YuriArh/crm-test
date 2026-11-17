@@ -96,7 +96,7 @@ docker-compose.yml, Makefile, settings.gradle.kts, build.gradle.kts
    - восстановление после перезапуска.
 2. **Режимы сбоев эмулятора:** недоступность, потеря ответа, дубликат, задержанный результат. Спека: `docs/specs/carrier-faults.md`.
    - **Падение и перезапуск во время обмена** (D04, D-NF01, NF03; решение 15.11.2026). Отдельных сценариев рестарта нет. Требование — инвариант: в какой бы момент `dispatch` или БД ни упали и сколько бы ни лежали, после старта каждая принятая заявка доходит до итога, ничего не теряется и не исполняется дважды. Конкретные окна (посреди отправки, до чтения ленты, истёкший захват) покрыты интеграционными тестами (`SendWorkerTests`, `FeedPollerTests`); на стенде показываем, как в жизни.
-   - Команды: `make dispatch-kill` (`docker compose kill dispatch`, SIGKILL как настоящее падение), `make dispatch-start` (`docker compose start dispatch` и ожидание health); для БД `make db-kill` / `make db-start`. Момент падения и длительность простоя выбирает проверяющий. В гейт не входят.
+   - Команды: `make dispatch-kill` (`docker compose kill dispatch`, SIGKILL как настоящее падение), `make dispatch-start` (`docker compose start dispatch` и ожидание health); для эмулятора `make carrier-kill` / `make carrier-start`; для БД `make db-kill` / `make db-start`. Момент падения и длительность простоя выбирает проверяющий. В гейт не входят.
    - README, одна общая процедура:
      1. создать заявки, можно несколько и с любыми режимами сбоев (`make fault-*`);
      2. в любой момент `make dispatch-kill`, подождать сколько угодно, `make dispatch-start`, войти заново (сессия хранится в памяти);

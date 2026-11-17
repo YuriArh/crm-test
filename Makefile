@@ -4,7 +4,7 @@ export
 
 .PHONY: help up down reset logs logs-carrier ps db build test run wait e2e seed contracts-lint carrier-ops inbox \
         faults fault-unavailable fault-lose-response fault-duplicate fault-delayed fault-malformed fault-off \
-        dispatch-kill dispatch-start db-kill db-start \
+        dispatch-kill dispatch-start carrier-kill carrier-start db-kill db-start \
         web-install web-dev web-build web-test web-e2e web-api-types web-api-check
 
 REDOCLY_IMAGE := redocly/cli:1.34.3
@@ -64,6 +64,13 @@ dispatch-kill: ## Crash dispatch (SIGKILL) in the middle of whatever it is doing
 
 dispatch-start: ## Start dispatch after dispatch-kill and wait until it is healthy (sign in again: sessions are in memory)
 	docker compose start dispatch
+	@$(MAKE) --no-print-directory wait
+
+carrier-kill: ## Crash carrier-emulator (SIGKILL); its fault modes are off after carrier-start (they live in memory)
+	docker compose kill carrier-emulator
+
+carrier-start: ## Start carrier-emulator after carrier-kill and wait until dispatch and carrier-emulator are healthy
+	docker compose start carrier-emulator
 	@$(MAKE) --no-print-directory wait
 
 db-kill: ## Crash PostgreSQL (SIGKILL); dispatch and carrier-emulator lose their databases but keep running
