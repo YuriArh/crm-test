@@ -14,10 +14,13 @@ import { PropertiesPanel } from './PropertiesPanel';
 import { RequestNotFound } from './RequestNotFound';
 import { ResultSection } from './ResultSection';
 import { RetryAction } from './RetryAction';
-
-/** Problems of the delivery itself: their notice offers «Повторить отправку» when the card allows it. */
-const DELIVERY_KINDS = new Set<string>(['DELIVERY_UNKNOWN', 'DELIVERY_FAILED']);
 import { useCardEditor } from './useCardEditor';
+
+/**
+ * Problems a retry closes: their notice offers «Повторить отправку» when the card allows it. «Сверить сейчас» stays
+ * in the exchange panel only — a check often closes the problem, and its outcome would vanish with the notice.
+ */
+const RETRY_KINDS = new Set<string>(['DELIVERY_UNKNOWN', 'DELIVERY_FAILED', 'EXTERNAL_MISSING']);
 
 /**
  * The request card. Desktop: main content on the left, properties (and the operator's exchange block) in
@@ -41,7 +44,7 @@ export function RequestCardPage({ id }: { id: string }) {
     <ProblemsBlock
       problems={card.problems}
       onDecide={decisions.open}
-      actionsFor={(problem) => (DELIVERY_KINDS.has(problem.kind) ? <RetryAction card={card} /> : null)}
+      actionsFor={(problem) => (RETRY_KINDS.has(problem.kind) ? <RetryAction card={card} /> : null)}
     />
   ) : null;
   const content = <ContentSection card={card} />;
