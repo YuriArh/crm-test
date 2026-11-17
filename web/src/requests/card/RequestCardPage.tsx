@@ -3,7 +3,7 @@ import { useMediaQuery } from '@mantine/hooks';
 import { useSuspenseQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { useCurrentUser } from '@/auth';
-import { ProblemsBlock } from '@/problems';
+import { ProblemsBlock, useDecisionDialog } from '@/problems';
 import { isCardGone, requestCardQueryOptions } from './api';
 import { CardHeader } from './CardHeader';
 import { ContentSection } from './ContentSection';
@@ -32,6 +32,7 @@ export function RequestCardPage({ id }: { id: string }) {
   });
   const { data: card, error } = useSuspenseQuery(requestCardQueryOptions(id));
   const editor = useCardEditor(card);
+  const decisions = useDecisionDialog();
 
   if (isCardGone(error)) return <RequestNotFound />;
 
@@ -39,6 +40,7 @@ export function RequestCardPage({ id }: { id: string }) {
   const problems = card.problems?.length ? (
     <ProblemsBlock
       problems={card.problems}
+      onDecide={decisions.open}
       actionsFor={(problem) => (DELIVERY_KINDS.has(problem.kind) ? <RetryAction card={card} /> : null)}
     />
   ) : null;
@@ -58,6 +60,7 @@ export function RequestCardPage({ id }: { id: string }) {
   return (
     <Container size="lg" px={0}>
       <LeaveGuard dirty={editor.dirty} />
+      {decisions.dialog}
       {phone ? (
         <Stack gap="xl">
           {header}

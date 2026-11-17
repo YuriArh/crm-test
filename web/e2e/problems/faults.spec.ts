@@ -19,6 +19,34 @@ test.afterEach(async () => {
   await allFaultsOff();
 });
 
+test('a broken carrier record is acknowledged with a comment in the card', async ({ page }) => {
+  test.setTimeout(SYSTEM_TIMEOUT + 30_000);
+  // malformed spoils the price of every SUCCEEDED result in the feed: the record becomes INVALID_MESSAGE.
+  await setFaults({ malformed: true });
+  const request = await createRequestViaApi(page, 'north.initiator', { cargoDescription: uniqueCargo('Проблемы цена') });
+  await signInViaApi(page, 'north.operator');
+
+  await page.goto(`/requests/${request.id}`);
+  const problems = page.getByRole('region', { name: 'Проблемы' });
+  const notice = problems.getByRole('alert').filter({ hasText: 'Некорректное сообщение перевозчика' });
+  await expect(notice).toBeVisible({ timeout: SYSTEM_TIMEOUT });
+  await setFaults({});
+  await expect(notice.getByRole('region', { name: 'Сообщение перевозчика' })).toContainText('price');
+
+  await notice.getByRole('button', { name: 'Разобрано' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Разобрано' });
+  await dialog.getByRole('textbox', { name: 'Комментарий' }).fill('Сообщил перевозчику о битой цене');
+  await dialog.getByRole('button', { name: 'Сохранить решение' }).click();
+
+  await expect(page.getByText('Решение сохранено')).toBeVisible();
+  await expect(notice).toHaveCount(0);
+  await problems.getByRole('button', { name: /Закрытые проблемы/ }).click();
+  const line = problems.getByRole('button', { name: /Некорректное сообщение перевозчика.*Оператор \(Север\).*Разобрано/ });
+  await expect(line).toBeVisible();
+  await line.click();
+  await expect(problems.getByText('Сообщил перевозчику о битой цене')).toBeVisible();
+});
+
 test('a lost answer shows «unknown whether received» in the card until the system closes it', async ({ page }) => {
   test.setTimeout(SYSTEM_TIMEOUT + 30_000);
   // A lost answer alone is not enough: the result comes by the feed before the send times out.
