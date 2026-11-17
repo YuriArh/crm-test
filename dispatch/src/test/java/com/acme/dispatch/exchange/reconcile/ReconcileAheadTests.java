@@ -103,6 +103,23 @@ class ReconcileAheadTests {
     }
 
     @Test
+    void takenOverRecordHasProcessedAt() {
+        RequestCard request = requests.create("1");
+        carrier.answer(PERMANENT);
+        worker.runOnce();
+        carrier.lookupAnswer(request.operationId(), FakeCarrier.executed(request.operationId(),
+                succeeded(1, request.operationId(), "TRK-00000001", "612.50")));
+        clock.advance(Duration.ofMinutes(3));
+
+        reconciler.check(request.id(), RunType.SCHEDULED, null);
+
+        assertThat(jdbc.sql("SELECT processed_at FROM inbox WHERE operation_id = :id")
+                .param("id", request.operationId())
+                .query((rs, n) -> rs.getObject(1, java.time.OffsetDateTime.class).toInstant()).single())
+                .isEqualTo(START.plus(Duration.ofMinutes(3)));
+    }
+
+    @Test
     void invalidFeedRecordThenReconciliation() {
         RequestCard request = acknowledged();
         JsonNode good = succeeded(1, request.operationId(), "TRK-00000001", "612.50");

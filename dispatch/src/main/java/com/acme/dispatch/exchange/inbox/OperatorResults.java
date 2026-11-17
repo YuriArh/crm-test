@@ -56,7 +56,7 @@ public class OperatorResults {
                 .orElseGet(() -> inbox.findId(InboxSource.RECONCILIATION, message.messageId()).orElseThrow());
         inbox.lockRecord(inboxId);
         applyChosen(inboxId, now);
-        inbox.recordOutcome(inboxId, InboxDao.Decision.APPLIED, reason, message);
+        inbox.recordOutcome(inboxId, InboxDao.Decision.APPLIED, reason, message, now);
         return true;
     }
 

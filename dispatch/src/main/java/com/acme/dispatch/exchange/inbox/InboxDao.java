@@ -114,15 +114,17 @@ public class InboxDao {
 
     /**
      * Records how a record was decided. The parsed fields are stored only when they are safe to store: typed values,
-     * and the result status only if it is a known one.
+     * and the result status only if it is a known one. {@code processed_at} is the time of the outcome it has now.
      */
-    void recordOutcome(UUID id, Decision decision, String reason, ResultMessage message) {
+    void recordOutcome(UUID id, Decision decision, String reason, ResultMessage message, Instant now) {
         jdbc.sql("""
                         UPDATE inbox
                            SET processing_status = :status, reason = :reason, next_attempt_at = NULL,
-                               operation_id = :operationId, sequence = :sequence, result_status = :resultStatus
+                               operation_id = :operationId, sequence = :sequence, result_status = :resultStatus,
+                               processed_at = :now
                          WHERE id = :id""")
                 .param("status", decision.name())
+                .param("now", toSql(now))
                 .param("reason", reason)
                 .param("operationId", message == null ? null : message.operationId())
                 .param("sequence", message == null ? null : message.sequence())
@@ -145,13 +147,14 @@ public class InboxDao {
     }
 
     /** Processing kept failing: the record is {@code FAILED} and kept for review. */
-    void recordFailed(UUID id, int attempts, String reason, String error) {
+    void recordFailed(UUID id, int attempts, String reason, String error, Instant now) {
         jdbc.sql("""
                         UPDATE inbox
                            SET processing_status = 'FAILED', attempts = :attempts, next_attempt_at = NULL,
-                               reason = :reason, last_error = :error
+                               reason = :reason, last_error = :error, processed_at = :now
                          WHERE id = :id""")
                 .param("attempts", attempts)
+                .param("now", toSql(now))
                 .param("reason", reason)
                 .param("error", error)
                 .param("id", id)

@@ -233,6 +233,54 @@ class InboxProcessorTests {
                 .as("the version the operator did not choose").isEqualTo("CONFLICT");
     }
 
+    @Test
+    void processedRecordHasProcessedAt() {
+        RequestCard request = requests.create("1");
+        UUID operationId = request.operationId();
+        UUID applied = results.receive(succeeded(1, operationId, "TRK-00000001", "325.00")).orElseThrow();
+        UUID stale = results.receive(inProgress(2, operationId)).orElseThrow();
+        UUID conflict = results.receive(succeeded(3, operationId, "TRK-00000002", "400.00")).orElseThrow();
+        UUID invalid = results.receive(succeeded(4, UUID.randomUUID(), "TRK-00000003", "1.00")).orElseThrow();
+        Instant processing = START.plusSeconds(30);
+        clock.set(processing);
+
+        processor.processDue();
+
+        assertThat(List.of(results.status(applied), results.status(stale), results.status(conflict),
+                results.status(invalid))).containsExactly("APPLIED", "STALE", "CONFLICT", "INVALID");
+        assertThat(List.of(results.processedAt(applied), results.processedAt(stale), results.processedAt(conflict),
+                results.processedAt(invalid))).containsOnly(processing);
+    }
+
+    @Test
+    void failedRecordHasProcessedAt() {
+        RequestCard request = requests.create("1");
+        doThrow(new IllegalStateException("simulated bug")).when(dao).applyToRequest(any(), any(), any());
+        UUID id = results.receive(inProgress(1, request.operationId())).orElseThrow();
+
+        processor.processDue();
+        for (int pass = 2; pass <= 5; pass++) {
+            clock.advance(Duration.ofMinutes(1));
+            processor.processDue();
+        }
+
+        assertThat(results.status(id)).isEqualTo("FAILED");
+        assertThat(results.processedAt(id)).isEqualTo(START.plus(Duration.ofMinutes(4)));
+    }
+
+    @Test
+    void retriedRecordIsNotProcessedYet() {
+        RequestCard request = requests.create("1");
+        doThrow(new IllegalStateException("simulated glitch")).doCallRealMethod()
+                .when(dao).applyToRequest(any(), any(), any());
+        UUID id = results.receive(inProgress(1, request.operationId())).orElseThrow();
+
+        processor.processDue();
+
+        assertThat(results.status(id)).isEqualTo("RECEIVED");
+        assertThat(results.processedAt(id)).isNull();
+    }
+
     private UUID appliedRecord(RequestCard request) {
         return jdbc.sql("SELECT applied_inbox_id FROM dispatch_operation WHERE request_id = :id")
                 .param("id", request.id())

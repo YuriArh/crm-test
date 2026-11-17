@@ -159,7 +159,7 @@ public class InboxProcessor {
     /** After the savepoint: records the outcome and opens or closes the problems it causes. */
     private void finish(Pending record, Outcome outcome, Instant now) {
         if (outcome.decision() != Decision.FAILED) {
-            inbox.recordOutcome(record.id(), outcome.decision(), outcome.reason(), outcome.message());
+            inbox.recordOutcome(record.id(), outcome.decision(), outcome.reason(), outcome.message(), now);
         }
         problems.onRecordOutcome(record.id(), outcome.requestId(), outcome.decision(), outcome.reason(), now);
         if (outcome.acknowledged()) {
@@ -193,7 +193,7 @@ public class InboxProcessor {
             return Optional.empty();
         }
         String reason = SafeText.of("Processing failed " + attempts + " times: " + e);
-        inbox.recordFailed(record.id(), attempts, reason, error);
+        inbox.recordFailed(record.id(), attempts, reason, error, now);
         log.error("Result {} for operation {} is FAILED: {}", record.messageId(), operationId(message), reason);
         UUID requestId = message == null || message.operationId() == null
                 ? null
