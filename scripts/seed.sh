@@ -197,6 +197,24 @@ scenario seed-north-6 "loseResponse delayed" \
 scenario seed-north-7 "duplicate" '.deliveryStatus == "ACKNOWLEDGED"' "the carrier's receipt" \
   "Бумага офисная, 60 коробок" 610 "ул. Печатная, 9" 4
 
+# reconcile_now <id>: «Сверить сейчас» by the operator. The background would take the request only after 2 min;
+# here the carrier's result is taken over at once, and the check shows in the card with its author.
+reconcile_now() {
+  local out outcome
+  out=$(call north.operator -X POST -H "Idempotency-Key: seed-north-8-reconcile" "$API/api/requests/$1/reconcile")
+  [ "$(tail -n1 <<<"$out")" = 200 ] || { echo "seed: reconciliation of $1 failed: $out" >&2; exit 1; }
+  outcome=$(sed '$d' <<<"$out" | jq -r .outcome)
+  echo "  seed-north-8: «Сверить сейчас» — $outcome"
+  # Not an error: a run longer than 2 min may have let the background take the result first.
+  [ "$outcome" = EXTERNAL_AHEAD ] || echo "  seed-north-8: expected EXTERNAL_AHEAD: $(sed '$d' <<<"$out" | jq -r .details)" >&2
+}
+
+# malformed spoils the price of a SUCCEEDED result in the feed only: the record is INVALID and stays a problem for
+# the operator («Разобрано»), while the carrier itself has the right result for reconciliation to take over.
+# «В работе» and the result are published together, so «В работе» means the spoiled record has been read.
+scenario seed-north-8 "malformed" '.businessStatus == "IN_PROGRESS"' "the spoiled result to be read" \
+  "Электроника, 12 коробок" 150 "Технопарк, стр. 3" 3 reconcile_now
+
 echo "Created requests and their outcomes:"
 for entry in "${ids[@]}"; do
   user=${entry%%:*}; id=${entry#*:}
