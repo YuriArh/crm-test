@@ -28,17 +28,19 @@ public class ReconciliationDao {
     }
 
     /**
-     * Requests whose operation the background checks now ({@code reconciliation.md} §2.1): delivery {@code UNKNOWN} or
-     * {@code FAILED}; acknowledged before {@code acknowledgedBefore} and still without a final result; or with an open
-     * problem that reconciliation closes. Only those whose next check is due; never checked first.
+     * Requests whose operation the background checks now ({@code reconciliation.md} §2.1): delivery {@code FAILED};
+     * {@code UNKNOWN} unchanged since before {@code staleBefore} (a fresh one is cleared up by its own resend, and
+     * checking it would race with it); acknowledged before {@code staleBefore} and still without a final result; or
+     * with an open problem that reconciliation closes. Only those whose next check is due; never checked first.
      */
-    public List<UUID> findDue(Instant now, Instant acknowledgedBefore, int limit) {
+    public List<UUID> findDue(Instant now, Instant staleBefore, int limit) {
         return jdbc.sql("""
                         SELECT o.request_id FROM dispatch_operation o
                           JOIN delivery_request r ON r.id = o.request_id
                          WHERE (o.next_reconcile_at IS NULL OR o.next_reconcile_at <= :now)
-                           AND (o.delivery_status IN ('UNKNOWN', 'FAILED')
-                                OR (o.delivery_status = 'ACKNOWLEDGED' AND o.acknowledged_at <= :acknowledgedBefore
+                           AND (o.delivery_status = 'FAILED'
+                                OR (o.delivery_status = 'UNKNOWN' AND o.updated_at <= :staleBefore)
+                                OR (o.delivery_status = 'ACKNOWLEDGED' AND o.acknowledged_at <= :staleBefore
                                     AND r.business_status NOT IN ('SUCCEEDED', 'REJECTED'))
                                 OR EXISTS (SELECT 1 FROM problem p
                                             WHERE p.request_id = o.request_id AND p.status = 'OPEN'
@@ -46,7 +48,7 @@ public class ReconciliationDao {
                          ORDER BY o.next_reconcile_at NULLS FIRST, o.request_id
                          LIMIT :limit""")
                 .param("now", toSql(now))
-                .param("acknowledgedBefore", toSql(acknowledgedBefore))
+                .param("staleBefore", toSql(staleBefore))
                 .param("limit", limit)
                 .query(UUID.class)
                 .list();

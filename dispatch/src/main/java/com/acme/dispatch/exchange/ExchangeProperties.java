@@ -24,7 +24,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param inboxInitialBackoff   pause before the second processing attempt; doubles with every attempt
  * @param inboxMaxBackoff       upper bound of that pause
  * @param reconcileInterval     pause between background reconciliation passes
- * @param reconcileThreshold    how long an acknowledged operation without a result waits before it is reconciled
+ * @param reconcileThreshold    how long an operation stays UNKNOWN, or acknowledged without a result, before the
+ *                              background reconciles it
  * @param reconcilePause        pause before the next check of an operation; doubles while the answer stays the same
  * @param reconcilePauseMax     upper bound of that pause
  * @param reconcilePerPass      most operations checked in one background pass

@@ -96,6 +96,7 @@ class ReconcilerTests {
         schedule(checkedRecently, clock.instant(), clock.instant().plus(Duration.ofMinutes(5)));
         clock.advance(Duration.ofMinutes(1));
         sent(null);                                             // acknowledged a moment ago
+        sent(TIMEOUT);                                          // UNKNOWN a moment ago: its resend clears it up
         sent(TEMPORARY);                                        // RETRY_WAIT
         requests.create("1");                                   // PENDING: not sent yet
 
@@ -109,6 +110,7 @@ class ReconcilerTests {
         RequestCard neverChecked = sent(TIMEOUT);
         RequestCard dueEarlier = sent(TIMEOUT);
         RequestCard dueLater = sent(TIMEOUT);
+        clock.advance(Duration.ofMinutes(3));
         Instant now = clock.instant();
         schedule(dueEarlier, now.minus(Duration.ofMinutes(20)), now.minus(Duration.ofMinutes(2)));
         schedule(dueLater, now.minus(Duration.ofMinutes(20)), now.minus(Duration.ofMinutes(1)));
@@ -122,6 +124,7 @@ class ReconcilerTests {
     void unavailableStopsPass() {
         sent(TIMEOUT);
         sent(TIMEOUT);
+        clock.advance(Duration.ofMinutes(3));
         carrier.lookupUnavailable(true);
 
         reconciler.runOnce(RunType.SCHEDULED);
@@ -136,6 +139,7 @@ class ReconcilerTests {
         assertThat(output.getOut()).doesNotContain("Reconciliation SCHEDULED");
 
         sent(TIMEOUT);
+        clock.advance(Duration.ofMinutes(3));
         reconciler.runOnce(RunType.SCHEDULED);
 
         assertThat(output.getOut()).contains("Reconciliation SCHEDULED: checked 1 — MATCH 0, EXTERNAL_AHEAD 0, "
