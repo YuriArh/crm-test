@@ -393,7 +393,9 @@ paths:
       tags: [requests]
       operationId: getRequest
       summary: Request card
-      description: '`exchange` and `problems` are present for operators only; `actions` is empty for initiators.'
+      description: |
+        `exchange`, `problems` and `reconciliations` are present for operators only; `actions` is empty for
+        initiators.
       responses:
         '200':
           description: The request card.
@@ -499,11 +501,12 @@ paths:
         - session: []
           csrf: []
       description: |
-        Operators of the request's service only. Allowed while the delivery is `FAILED` or `UNKNOWN`
-        (`actions` of the card has `RETRY`). Starts a new budget of retries and sends at once, with the same
-        `operationId`: the carrier never executes one operation twice. `FAILED` becomes `PENDING`; `UNKNOWN`
-        stays `UNKNOWN` until the carrier confirms receipt. An open `DELIVERY_FAILED` problem is closed as
-        `RETRIED`.
+        Operators of the request's service only. Allowed while `actions` of the card has `RETRY`: the delivery
+        is `FAILED` or `UNKNOWN`, or it is `ACKNOWLEDGED` but the carrier lost the operation (an open
+        `EXTERNAL_MISSING`) and the request has no final result. Starts a new budget of retries and sends at
+        once, with the same `operationId`: the carrier never executes one operation twice. `FAILED` and
+        `ACKNOWLEDGED` become `PENDING`; `UNKNOWN` stays `UNKNOWN` until the carrier confirms receipt. Open
+        `DELIVERY_FAILED` and `EXTERNAL_MISSING` problems are closed as `RETRIED`.
       parameters:
         - name: Idempotency-Key
           in: header
@@ -539,7 +542,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: '`INVALID_STATE`: the delivery is neither `FAILED` nor `UNKNOWN` now.'
+          description: '`INVALID_STATE`: `RETRY` is not among the actions now (see above).'
           content:
             application/problem+json:
               schema:
@@ -552,6 +555,73 @@ paths:
                     detail: Delivery of request DR-000123 is ACKNOWLEDGED; only FAILED or UNKNOWN can be retried
                     instance: /api/requests/0195f3a2-7c41-7d10-9a5e-3f1c2b4d5e60/retry
                     code: INVALID_STATE
+        '422':
+          description: The `Idempotency-Key` was already used for another action or request.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/requests/{id}/reconcile:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Request id. A malformed id answers `404`, like a missing request.
+        schema:
+          type: string
+    post:
+      tags: [problems]
+      operationId: reconcileRequest
+      summary: Reconcile now
+      security:
+        - session: []
+          csrf: []
+      description: |
+        Operators of the request's service only; any state. Asks the carrier about the request's operation right
+        now and acts as background reconciliation does: confirms the delivery if the carrier knows it, takes the
+        carrier's result over if we have none, opens `EXTERNAL_MISSING` or `RECONCILIATION_CONFLICT` for an
+        operator. A carrier that does not answer is an outcome too (`ERROR`), not an error of this call. The
+        card requested after the response already shows what the check changed.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: |
+            Client-generated key of this action, at most 100 characters. A repeat with the same key returns the
+            recorded check and does not ask the carrier again; send a new key to check again.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+      responses:
+        '200':
+          description: The recorded check, or the replay of an earlier check with the same key.
+          headers:
+            Idempotent-Replayed:
+              description: '`true` when this response was replayed for a repeated `Idempotency-Key`.'
+              schema:
+                type: string
+                enum: ['true', 'false']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reconciliation'
+              examples:
+                ahead:
+                  $ref: '#/components/examples/ReconciliationAhead'
+        '400':
+          description: No `Idempotency-Key` header (`IDEMPOTENCY_KEY_REQUIRED`) or a too long one.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '422':
           description: The `Idempotency-Key` was already used for another action or request.
           content:
@@ -632,9 +702,11 @@ paths:
           csrf: []
       description: |
         Operators only; a problem of another service answers `404`. The decision must be one of the problem's
-        `actions`: `APPLY_CARRIER` (replace the request's result with the disputed final record) or `KEEP_OURS`
-        for `RESULT_CONFLICT`; `ACKNOWLEDGED` for `INVALID_MESSAGE` and `MESSAGE_FAILED`. Delivery problems are
-        closed by the system or by retrying the delivery. `APPLY_CARRIER` bumps the request's `version`.
+        `actions`: `APPLY_CARRIER` (replace the request's result with the carrier's final result) or `KEEP_OURS`
+        for `RESULT_CONFLICT` and `RECONCILIATION_CONFLICT` (`APPLY_CARRIER` only while the carrier's side is a
+        final result); `KEEP_OURS` for `EXTERNAL_MISSING` while the request has a final result; `ACKNOWLEDGED`
+        for `INVALID_MESSAGE` and `MESSAGE_FAILED`. Delivery problems, and `EXTERNAL_MISSING` without a result,
+        are closed by the system or by retrying the delivery. `APPLY_CARRIER` bumps the request's `version`.
       parameters:
         - name: Idempotency-Key
           in: header
@@ -858,8 +930,46 @@ components:
           lastError: null
           acknowledgedAt: '2026-11-12T09:15:04Z'
           acknowledgedVia: RESPONSE
-        actions: []
+        actions: [RECONCILE]
         problems: []
+        reconciliations:
+          - id: 0195f3a2-8b00-7000-8000-000000000001
+            checkedAt: '2026-11-12T09:20:00Z'
+            trigger: SCHEDULED
+            performedBy: null
+            outcome: MATCH
+            acknowledged: false
+            carrierState: EXECUTED
+            carrierResult:
+              status: SUCCEEDED
+              trackingNumber: TRK-3F1C2B4D
+              price: 612.5
+              reason: null
+              sequence: 2
+              messageId: 0195f3a2-8000-7a00-8b00-000000000002
+              occurredAt: '2026-11-12T09:15:09Z'
+            details: 'Results match: SUCCEEDED|TRK-3F1C2B4D|612.5|; response: {"operationId":…}'
+    ReconciliationAhead:
+      summary: The carrier had a result we did not; it was taken over
+      value:
+        id: 0195f3a2-8b00-7000-8000-000000000002
+        checkedAt: '2026-11-12T09:16:00Z'
+        trigger: MANUAL
+        performedBy:
+          id: 0195f3a2-0000-7000-8000-000000000102
+          displayName: Оператор (Север)
+        outcome: EXTERNAL_AHEAD
+        acknowledged: false
+        carrierState: EXECUTED
+        carrierResult:
+          status: SUCCEEDED
+          trackingNumber: TRK-3F1C2B4D
+          price: 612.5
+          reason: null
+          sequence: 2
+          messageId: 0195f3a2-8000-7a00-8b00-000000000002
+          occurredAt: '2026-11-12T09:15:09Z'
+        details: 'Carrier has result SUCCEEDED|TRK-3F1C2B4D|612.5|, we have none; response: {"operationId":…}'
     ProblemPage:
       summary: An open result conflict, as an operator sees it
       value:
@@ -1240,20 +1350,32 @@ components:
           description: Problems of the request, open and resolved, newest first. Operators only.
           items:
             $ref: '#/components/schemas/ExchangeProblem'
+        reconciliations:
+          type: array
+          description: The latest reconciliation checks of the request (at most 20), newest first. Operators only.
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/Reconciliation'
 
     RequestAction:
       type: string
-      enum: [RETRY]
-      description: '`RETRY` — retry the delivery (it is `FAILED` or `UNKNOWN`).'
+      enum: [RETRY, RECONCILE]
+      description: |
+        `RETRY` — retry the delivery (it is `FAILED` or `UNKNOWN`, or the carrier lost an acknowledged operation
+        and there is no result); `RECONCILE` — reconcile now (always offered to an operator).
 
     ProblemKind:
       type: string
-      enum: [DELIVERY_UNKNOWN, DELIVERY_FAILED, INVALID_MESSAGE, MESSAGE_FAILED, RESULT_CONFLICT]
+      enum: [DELIVERY_UNKNOWN, DELIVERY_FAILED, INVALID_MESSAGE, MESSAGE_FAILED, RESULT_CONFLICT, EXTERNAL_MISSING,
+             RECONCILIATION_CONFLICT]
       description: |
         `DELIVERY_UNKNOWN` — unknown whether the carrier got the request (closed by the system once delivery is
         confirmed); `DELIVERY_FAILED` — delivery failed (attempts exhausted or refused); `INVALID_MESSAGE` — the
         carrier sent a record that breaks the contract; `MESSAGE_FAILED` — `dispatch` could not process a record;
-        `RESULT_CONFLICT` — a record disagrees with the applied result.
+        `RESULT_CONFLICT` — a record disagrees with the applied result; `EXTERNAL_MISSING` — reconciliation: the
+        carrier does not know an operation it acknowledged (closed by the system once it knows it again);
+        `RECONCILIATION_CONFLICT` — reconciliation: the carrier's result differs from ours, or only we have one
+        (closed by the system once they match).
 
     ProblemStatus:
       type: string
@@ -1263,9 +1385,10 @@ components:
       type: string
       enum: [SYSTEM, RETRIED, APPLY_CARRIER, KEEP_OURS, ACKNOWLEDGED]
       description: |
-        How the problem was closed: `SYSTEM` — by the system (delivery confirmed); `RETRIED` — an operator retried
-        the delivery; `APPLY_CARRIER` — an operator applied the disputed record; `KEEP_OURS` — an operator kept the
-        applied result; `ACKNOWLEDGED` — an operator looked into the record.
+        How the problem was closed: `SYSTEM` — by the system (delivery confirmed, the carrier knows the operation,
+        the results match); `RETRIED` — an operator retried the delivery; `APPLY_CARRIER` — an operator applied the
+        carrier's result; `KEEP_OURS` — an operator kept our result; `ACKNOWLEDGED` — an operator looked into the
+        record.
 
     RequestRef:
       type: object
@@ -1348,12 +1471,15 @@ components:
           type: [string, 'null']
           format: uuid
         message:
-          description: For `INVALID_MESSAGE`, `MESSAGE_FAILED`, `RESULT_CONFLICT`; otherwise `null`.
+          description: |
+            The carrier's side: the record for `INVALID_MESSAGE`, `MESSAGE_FAILED`, `RESULT_CONFLICT`; for
+            `RECONCILIATION_CONFLICT` the carrier's latest answer (its result fields, `null` when it has no result;
+            `feedSeq` is `null`); otherwise `null`.
           oneOf:
             - $ref: '#/components/schemas/ProblemMessage'
             - type: 'null'
         currentResult:
-          description: For `RESULT_CONFLICT`; otherwise `null`.
+          description: For `RESULT_CONFLICT`, `RECONCILIATION_CONFLICT` and `EXTERNAL_MISSING`; otherwise `null`.
           oneOf:
             - $ref: '#/components/schemas/CurrentResult'
             - type: 'null'
@@ -1387,6 +1513,72 @@ components:
           minLength: 1
           maxLength: 2000
           description: The ground for the decision; stored stripped, must not be blank.
+
+    Reconciliation:
+      type: object
+      description: One reconciliation check of a request's operation with the carrier.
+      required: [id, checkedAt, trigger, performedBy, outcome, acknowledged, carrierState, carrierResult, details]
+      properties:
+        id:
+          type: string
+          format: uuid
+        checkedAt:
+          type: string
+          format: date-time
+        trigger:
+          type: string
+          enum: [STARTUP, SCHEDULED, MANUAL]
+          description: '`MANUAL` — an operator''s «reconcile now»; the others are background passes.'
+        performedBy:
+          description: The operator of a manual check; `null` for background checks.
+          oneOf:
+            - $ref: '#/components/schemas/PersonRef'
+            - type: 'null'
+        outcome:
+          type: string
+          enum: [MATCH, EXTERNAL_AHEAD, EXTERNAL_MISSING, CONFLICT, ERROR]
+          description: |
+            `MATCH` — nothing to fix; `EXTERNAL_AHEAD` — the carrier had a result we did not, it was taken over;
+            `EXTERNAL_MISSING` — the carrier does not know the operation; `CONFLICT` — the results differ, or only
+            we have one; `ERROR` — the carrier did not answer or answered against the contract.
+        acknowledged:
+          type: boolean
+          description: Whether this check confirmed the delivery.
+        carrierState:
+          description: What the carrier said about the operation; `null` when it did not answer.
+          oneOf:
+            - type: string
+              enum: [ACCEPTED, EXECUTED, NOT_FOUND]
+            - type: 'null'
+        carrierResult:
+          description: The carrier's final result; `null` when it has none.
+          oneOf:
+            - $ref: '#/components/schemas/ReconciliationCarrierResult'
+            - type: 'null'
+        details:
+          type: string
+          description: Why the check concluded what it did, the carrier's own error text and the start of its answer.
+
+    ReconciliationCarrierResult:
+      type: object
+      required: [status, trackingNumber, price, reason, sequence, messageId, occurredAt]
+      properties:
+        status:
+          type: string
+          enum: [SUCCEEDED, REJECTED]
+        trackingNumber:
+          type: [string, 'null']
+        price:
+          type: [number, 'null']
+        reason:
+          type: [string, 'null']
+        sequence:
+          type: integer
+        messageId:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
 
     ExchangeProblemPage:
       type: object

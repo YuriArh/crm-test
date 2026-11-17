@@ -38,9 +38,9 @@ info:
     - a final result (`SUCCEEDED` / `REJECTED`) is never replaced automatically.
 
     **Reconciliation.** `GET /operations/{operationId}` returns the carrier's actual state of an
-    operation including its latest result with the same `messageId` and `sequence` as in the feed, so a
-    result applied from reconciliation is later recognised as a duplicate in the feed. `404` means the
-    carrier does not know the operation.
+    operation including its latest result with the same `messageId` and `sequence` as in the feed, so
+    when the same result later comes in the feed (same `sequence`, same content) it has no effect. `404`
+    means the carrier does not know the operation.
 
     **Unavailability.** While the carrier is unavailable, exchange endpoints answer `503 UNAVAILABLE`;
     the client retries later.

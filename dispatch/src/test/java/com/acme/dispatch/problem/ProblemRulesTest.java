@@ -58,45 +58,75 @@ class ProblemRulesTest {
 
     @Test
     void conflictWithAFinalRecordCanBeAppliedOrKept() {
-        assertThat(ProblemRules.decisions(ProblemKind.RESULT_CONFLICT, ProblemStatus.OPEN, true))
+        assertThat(ProblemRules.decisions(ProblemKind.RESULT_CONFLICT, ProblemStatus.OPEN, true, true))
                 .containsExactly(ProblemDecision.APPLY_CARRIER, ProblemDecision.KEEP_OURS);
     }
 
     @Test
     void conflictWithAnInProgressRecordCanOnlyBeKept() {
-        assertThat(ProblemRules.decisions(ProblemKind.RESULT_CONFLICT, ProblemStatus.OPEN, false))
+        assertThat(ProblemRules.decisions(ProblemKind.RESULT_CONFLICT, ProblemStatus.OPEN, false, true))
                 .containsExactly(ProblemDecision.KEEP_OURS);
     }
 
     @Test
     void messageProblemsAreAcknowledged() {
-        assertThat(ProblemRules.decisions(ProblemKind.INVALID_MESSAGE, ProblemStatus.OPEN, false))
+        assertThat(ProblemRules.decisions(ProblemKind.INVALID_MESSAGE, ProblemStatus.OPEN, false, false))
                 .containsExactly(ProblemDecision.ACKNOWLEDGED);
-        assertThat(ProblemRules.decisions(ProblemKind.MESSAGE_FAILED, ProblemStatus.OPEN, false))
+        assertThat(ProblemRules.decisions(ProblemKind.MESSAGE_FAILED, ProblemStatus.OPEN, false, false))
                 .containsExactly(ProblemDecision.ACKNOWLEDGED);
     }
 
     @ParameterizedTest
     @EnumSource(value = ProblemKind.class, names = {"DELIVERY_UNKNOWN", "DELIVERY_FAILED"})
     void deliveryProblemsAreNotResolvedDirectly(ProblemKind kind) {
-        assertThat(ProblemRules.decisions(kind, ProblemStatus.OPEN, false)).isEmpty();
+        assertThat(ProblemRules.decisions(kind, ProblemStatus.OPEN, false, false)).isEmpty();
     }
 
     @ParameterizedTest
     @EnumSource(ProblemKind.class)
     void resolvedProblemHasNoDecisions(ProblemKind kind) {
-        assertThat(ProblemRules.decisions(kind, ProblemStatus.RESOLVED, true)).isEmpty();
+        assertThat(ProblemRules.decisions(kind, ProblemStatus.RESOLVED, true, true)).isEmpty();
+    }
+
+    /** reconciliation.md §2.7: with a result ours stays (the carrier lost it); without one the way out is a retry. */
+    @Test
+    void externalMissingDecisions() {
+        assertThat(ProblemRules.decisions(ProblemKind.EXTERNAL_MISSING, ProblemStatus.OPEN, false, true))
+                .containsExactly(ProblemDecision.KEEP_OURS);
+        assertThat(ProblemRules.decisions(ProblemKind.EXTERNAL_MISSING, ProblemStatus.OPEN, false, false)).isEmpty();
+    }
+
+    /** reconciliation.md §2.7: the carrier's side can be applied only while it is a final result. */
+    @Test
+    void reconciliationConflictDecisions() {
+        assertThat(ProblemRules.decisions(ProblemKind.RECONCILIATION_CONFLICT, ProblemStatus.OPEN, true, true))
+                .containsExactly(ProblemDecision.APPLY_CARRIER, ProblemDecision.KEEP_OURS);
+        assertThat(ProblemRules.decisions(ProblemKind.RECONCILIATION_CONFLICT, ProblemStatus.OPEN, false, true))
+                .containsExactly(ProblemDecision.KEEP_OURS);
     }
 
     @ParameterizedTest
     @EnumSource(value = DeliveryStatus.class, names = {"FAILED", "UNKNOWN"})
     void failedAndUnknownDeliveryCanBeRetried(DeliveryStatus status) {
-        assertThat(ProblemRules.requestActions(status)).containsExactly(RequestAction.RETRY);
+        assertThat(ProblemRules.requestActions(status, Set.of(), false))
+                .containsExactly(RequestAction.RETRY, RequestAction.RECONCILE);
     }
 
     @ParameterizedTest
     @EnumSource(value = DeliveryStatus.class, names = {"PENDING", "SENDING", "RETRY_WAIT", "ACKNOWLEDGED"})
-    void otherDeliveryHasNoActions(DeliveryStatus status) {
-        assertThat(ProblemRules.requestActions(status)).isEmpty();
+    void otherDeliveryCanOnlyBeReconciled(DeliveryStatus status) {
+        assertThat(ProblemRules.requestActions(status, Set.of(), false)).containsExactly(RequestAction.RECONCILE);
+    }
+
+    @Test
+    void lostAcknowledgedOperationWithoutResultCanBeRetried() {
+        assertThat(ProblemRules.requestActions(DeliveryStatus.ACKNOWLEDGED, Set.of(ProblemKind.EXTERNAL_MISSING),
+                false)).containsExactly(RequestAction.RETRY, RequestAction.RECONCILE);
+    }
+
+    @Test
+    void lostAcknowledgedOperationWithResultIsNotRetried() {
+        assertThat(ProblemRules.requestActions(DeliveryStatus.ACKNOWLEDGED, Set.of(ProblemKind.EXTERNAL_MISSING),
+                true)).containsExactly(RequestAction.RECONCILE);
     }
 }

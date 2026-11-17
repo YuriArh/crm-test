@@ -6,6 +6,7 @@ import static com.acme.dispatch.support.DemoData.NORTH_OPERATOR_LOGIN;
 import static com.acme.dispatch.support.TestClockConfiguration.START;
 import static com.acme.dispatch.support.TestSecurity.asUser;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -85,7 +86,7 @@ class RetryActionTests {
                 .andExpect(jsonPath("$.id").value(request.id().toString()))
                 .andExpect(jsonPath("$.deliveryStatus").value("PENDING"))
                 .andExpect(jsonPath("$.operationId").value(request.operationId().toString()))
-                .andExpect(jsonPath("$.actions", hasSize(0)))
+                .andExpect(jsonPath("$.actions", contains("RECONCILE")))
                 .andExpect(jsonPath("$.problems[0].kind").value("DELIVERY_FAILED"))
                 .andExpect(jsonPath("$.problems[0].status").value("RESOLVED"))
                 .andExpect(jsonPath("$.problems[0].decision").value("RETRIED"))
