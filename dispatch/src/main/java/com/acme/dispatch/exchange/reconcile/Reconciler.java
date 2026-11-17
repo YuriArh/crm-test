@@ -30,6 +30,8 @@ import com.acme.dispatch.problem.ProblemService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
@@ -117,6 +119,18 @@ public class Reconciler {
                 .orElseThrow(() -> new IllegalStateException("Request " + requestId + " has no operation"));
         Asked asked = ask(operationId);
         return transaction.execute(status -> record(requestId, asked, runType, performedBy));
+    }
+
+    /**
+     * Checks one request inside the caller's transaction — an operator's «Сверить сейчас», whose
+     * {@code Idempotency-Key} must commit with the check. The carrier is asked before the operation row is locked, so
+     * the lock is held only while deciding; the connection is held at most for the carrier's timeouts.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Checked checkInTransaction(UUID requestId, RunType runType, UUID performedBy) {
+        UUID operationId = dao.operationOf(requestId)
+                .orElseThrow(() -> new IllegalStateException("Request " + requestId + " has no operation"));
+        return record(requestId, ask(operationId), runType, performedBy);
     }
 
     private Asked ask(UUID operationId) {

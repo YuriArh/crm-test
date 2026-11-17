@@ -10,6 +10,10 @@ import com.acme.dispatch.common.web.ApiException;
 import com.acme.dispatch.common.web.ErrorCode;
 import com.acme.dispatch.exchange.SendQueueDao;
 import com.acme.dispatch.exchange.inbox.OperatorResults;
+import com.acme.dispatch.exchange.reconcile.Reconciler;
+import com.acme.dispatch.exchange.reconcile.ReconciliationQueryDao;
+import com.acme.dispatch.exchange.reconcile.ReconciliationView;
+import com.acme.dispatch.exchange.reconcile.RunType;
 import com.acme.dispatch.idempotency.IdempotencyService;
 import com.acme.dispatch.idempotency.IdempotentOutcome;
 import com.acme.dispatch.idempotency.IdempotentResponse;
@@ -32,6 +36,7 @@ public class OperatorActions {
 
     static final String RETRY_OPERATION = "RETRY_DELIVERY";
     static final String RESOLVE_OPERATION = "RESOLVE_PROBLEM";
+    static final String RECONCILE_OPERATION = "RECONCILE";
 
     private static final Logger log = LoggerFactory.getLogger(OperatorActions.class);
 
@@ -42,10 +47,12 @@ public class OperatorActions {
     private final OperatorResults results;
     private final IdempotencyService idempotency;
     private final BusinessCalendar calendar;
+    private final Reconciler reconciler;
+    private final ReconciliationQueryDao reconciliations;
 
     public OperatorActions(RequestQueryService cards, SendQueueDao queue, ProblemDao problems,
                            ProblemQueryDao problemQueries, OperatorResults results, IdempotencyService idempotency,
-                           BusinessCalendar calendar) {
+                           BusinessCalendar calendar, Reconciler reconciler, ReconciliationQueryDao reconciliations) {
         this.cards = cards;
         this.queue = queue;
         this.problems = problems;
@@ -53,6 +60,8 @@ public class OperatorActions {
         this.results = results;
         this.idempotency = idempotency;
         this.calendar = calendar;
+        this.reconciler = reconciler;
+        this.reconciliations = reconciliations;
     }
 
     /**
@@ -87,6 +96,25 @@ public class OperatorActions {
                             body.decision());
                     return new IdempotentResponse<>(200, problemQueries.find(problemId, user).orElseThrow(),
                             problemId);
+                });
+    }
+
+    /**
+     * «Сверить сейчас» ({@code docs/specs/reconciliation.md} §2.7): asks the carrier about the request's operation
+     * and acts on the outcome, like the background does. Any state; an unavailable carrier is an outcome too. A repeat
+     * with the same key returns the recorded check without asking the carrier again.
+     */
+    @Transactional
+    public IdempotentOutcome<ReconciliationView> reconcile(CurrentUser user, UUID requestId, String idempotencyKey) {
+        RequestCard card = cards.getCard(requestId, user);
+        ProblemController.requireOperator(user);
+        return idempotency.execute(user.id(), idempotencyKey, RECONCILE_OPERATION, Map.of("requestId", requestId),
+                ReconciliationView.class, () -> {
+                    Reconciler.Checked checked = reconciler.checkInTransaction(requestId, RunType.MANUAL, user.id());
+                    log.info("Operator {} reconciled request {} (operation {}): {}", user.username(), card.number(),
+                            card.operationId(), checked.outcome());
+                    return new IdempotentResponse<>(200,
+                            reconciliations.find(checked.reconciliationId()).orElseThrow(), requestId);
                 });
     }
 

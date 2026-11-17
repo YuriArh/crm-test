@@ -6,6 +6,7 @@ import java.util.UUID;
 
 import com.acme.dispatch.auth.CurrentUser;
 import com.acme.dispatch.common.web.ApiException;
+import com.acme.dispatch.exchange.reconcile.ReconciliationView;
 import com.acme.dispatch.idempotency.IdempotentOutcome;
 import com.acme.dispatch.request.RequestCard;
 
@@ -37,6 +38,13 @@ class OperatorActionController {
                                       @RequestHeader(IDEMPOTENCY_KEY_HEADER) String idempotencyKey,
                                       @AuthenticationPrincipal CurrentUser user) {
         return respond(actions.retry(user, requestId(id), idempotencyKey));
+    }
+
+    @PostMapping("/api/requests/{id}/reconcile")
+    ResponseEntity<ReconciliationView> reconcile(@PathVariable String id,
+                                                 @RequestHeader(IDEMPOTENCY_KEY_HEADER) String idempotencyKey,
+                                                 @AuthenticationPrincipal CurrentUser user) {
+        return respond(actions.reconcile(user, requestId(id), idempotencyKey));
     }
 
     @PostMapping("/api/problems/{id}/resolve")
