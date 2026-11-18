@@ -6,7 +6,7 @@ export
         faults fault-unavailable fault-lose-response fault-duplicate fault-delayed fault-malformed fault-off \
         dispatch-kill dispatch-start carrier-kill carrier-start db-kill db-start \
         web-install web-dev web-build web-test web-e2e web-api-types web-api-check \
-        load-up load-down load-reset load-hello load-install load-typecheck
+        load-up load-down load-reset load-hello load-install load-typecheck load-seed
 
 REDOCLY_IMAGE := redocly/cli:1.34.3
 
@@ -93,8 +93,15 @@ db-start: ## Start PostgreSQL after db-kill and wait until dispatch and carrier-
 	docker compose start postgres
 	@$(MAKE) --no-print-directory wait
 
-load-up: ## Build and start the load-test stack (project exchange-load: own DB volume, ports 18080/18081/13000/15432)
+LOAD_DISPATCH_URL := http://localhost:18080
+LOAD_CARRIER_URL := http://localhost:18081
+
+load-up: ## Build and start the load-test stack and wait until it is healthy (own DB volume, ports 18080/18081/13000/15432)
 	$(LOAD_COMPOSE) up -d --build
+	@for url in $(LOAD_DISPATCH_URL) $(LOAD_CARRIER_URL); do \
+	  ok=; for i in $$(seq 1 45); do curl -sf $$url/actuator/health >/dev/null && { ok=1; break; }; sleep 2; done; \
+	  [ -n "$$ok" ] || { echo "not healthy at $$url"; exit 1; }; \
+	done
 
 load-down: ## Stop the load-test stack (data is kept)
 	$(LOAD_COMPOSE) down
@@ -107,6 +114,9 @@ load-install: ## Install TypeScript and k6 types in load/ (pnpm via corepack; k6
 
 load-typecheck: ## Type-check the k6 scripts in load/ (tsc --noEmit; k6 runs the .ts files itself)
 	cd load && corepack pnpm typecheck
+
+load-seed: ## Create the load data set through the API on an empty load stand (PROFILE=full: 5000 requests, smoke: 200)
+	$(K6) run -e PROFILE=$(or $(PROFILE),full) -e RUN_ID=$$(date +%s) /scripts/seed.ts
 
 load-hello: ## Minimal k6 script against the load-test stack (make load-up first)
 	$(K6) run /scripts/hello.ts

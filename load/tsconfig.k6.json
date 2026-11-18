@@ -18,6 +18,6 @@
     "allowImportingTsExtensions": true,
     "skipLibCheck": true
   },
-  "include": ["**/*.ts"],
+  "include": ["*.ts", "lib/**/*.ts"],
   "exclude": ["node_modules", "out"]
 }
