@@ -103,6 +103,39 @@ describe('history of the request', () => {
     expect(titles(history)).toContain('Попытка отправки 1: временная ошибка');
   });
 
+  it('says so when the chosen filter leaves nothing', async () => {
+    const user = userEvent.setup();
+    renderOperator([received(), attempt()]);
+    const history = await section();
+    await waitFor(() => expect(within(history).getAllByRole('listitem')).toHaveLength(2));
+
+    await user.click(within(history).getByRole('radio', { name: 'Действия людей' }));
+
+    expect(within(history).getByText('Таких записей нет')).toBeInTheDocument();
+    expect(within(history).queryByRole('listitem')).not.toBeInTheDocument();
+  });
+
+  it('shows that the history is loading until it comes', async () => {
+    serveCard(withExchange(succeededCard()));
+    serveOperators();
+    let release!: () => void;
+    const answered = new Promise<void>((resolve) => (release = resolve));
+    server.use(
+      http.get(`/api/requests/${CARD_ID}/history`, async () => {
+        await answered;
+        return Response.json({ items: [created()], nextCursor: null });
+      }),
+    );
+    renderApp(cardPath, { me: demoOperator });
+
+    const history = await section();
+    expect(within(history).getByText('Загрузка истории…')).toBeInTheDocument();
+
+    release();
+    expect(await within(history).findByRole('heading', { name: 'Заявка создана' })).toBeInTheDocument();
+    expect(within(history).queryByText('Загрузка истории…')).not.toBeInTheDocument();
+  });
+
   it('shows an initiator the business part without a filter', async () => {
     serveCard(succeededCard());
     serveHistory([edited(), resultChanged({ recordId: null }), acknowledged({ via: null }), created()]);
