@@ -1,0 +1,4 @@
+{
+  "full": { "vus": 20, "warmupSeconds": 30, "runSeconds": 120, "seedSize": 5000, "seedVus": 10 },
+  "smoke": { "vus": 2, "warmupSeconds": 10, "runSeconds": 20, "seedSize": 200, "seedVus": 2 }
+}

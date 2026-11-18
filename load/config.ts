@@ -13,12 +13,9 @@ export type Profile = {
     seedVus: number;
 };
 
-const PROFILES: Record<string, Profile> = {
-    // NF08: 30 s warm-up, 2 min run, 20 clients, 5000 records.
-    full: { vus: 20, warmupSeconds: 30, runSeconds: 120, seedSize: 5000, seedVus: 10 },
-    // A short pass over the whole chain to check the scripts; its numbers measure nothing.
-    smoke: { vus: 2, warmupSeconds: 10, runSeconds: 20, seedSize: 200, seedVus: 2 },
-};
+// profiles.json is shared with the report: full is the NF08 profile (30 s warm-up, 2 min run, 20 clients, 5000
+// records), smoke is a short pass over the whole chain whose numbers measure nothing.
+const PROFILES = JSON.parse(String(open('./profiles.json'))) as Record<string, Profile>;
 
 const profileName = __ENV.PROFILE || 'full';
 const profile = PROFILES[profileName];

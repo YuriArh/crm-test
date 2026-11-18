@@ -42,6 +42,11 @@ export const options: Options = {
         'http_req_duration{phase:run,op:card}': [],
         'http_req_duration{phase:run,op:create}': [],
         'http_req_duration{phase:run,op:update}': [],
+        // The same for the failed requests per op: the report counts successes and errors of each operation.
+        'http_req_failed{phase:run,op:list}': [],
+        'http_req_failed{phase:run,op:card}': [],
+        'http_req_failed{phase:run,op:create}': [],
+        'http_req_failed{phase:run,op:update}': [],
     },
     summaryTrendStats: ['count', 'avg', 'med', 'p(95)', 'p(99)', 'max'],
     setupTimeout: '5m',

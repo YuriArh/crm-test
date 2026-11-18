@@ -5,10 +5,11 @@
   "type": "module",
   "packageManager": "pnpm@10.15.1",
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.k6.json"
+    "typecheck": "tsc --noEmit -p tsconfig.k6.json && tsc --noEmit -p tsconfig.node.json"
   },
   "devDependencies": {
     "@types/k6": "2.3.1",
+    "@types/node": "^22.20.5",
     "typescript": "~6.0.3"
   }
 }

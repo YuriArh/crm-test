@@ -6,7 +6,7 @@ export
         faults fault-unavailable fault-lose-response fault-duplicate fault-delayed fault-malformed fault-off \
         dispatch-kill dispatch-start carrier-kill carrier-start db-kill db-start \
         web-install web-dev web-build web-test web-e2e web-api-types web-api-check \
-        load-up load-down load-reset load-install load-typecheck load-seed load-run load-smoke
+        load-up load-down load-reset load-install load-typecheck load-seed load-run load-smoke load-test
 
 REDOCLY_IMAGE := redocly/cli:1.34.3
 
@@ -121,8 +121,11 @@ load-seed: ## Create the load data set through the API on an empty load stand (P
 
 load-run: ## Run the load against the data set of load-seed (PROFILE=full: 20 clients, 30 s + 2 min; smoke: 2 clients, 10 s + 20 s)
 	@mkdir -p load/out
-	$(K6) run -e PROFILE=$(or $(PROFILE),full) -e RUN_ID=$$(date +%s) \
+	$(K6) run -e PROFILE=$(or $(PROFILE),full) -e RUN_ID=$(or $(RUN_ID),$$(date +%s)) \
 	  --out json=/scripts/out/requests.json --summary-export=/scripts/out/summary.json /scripts/run.ts
+
+load-test: ## The measured run and its report in load/out/report.md (PROFILE=full: NF08 profile; stop the demo stack: make down)
+	K6_IMAGE=$(K6_IMAGE) PROFILE=$(or $(PROFILE),full) ./load/load-test.sh
 
 load-smoke: ## The whole chain in a short form on a clean load stand: seed of 200 requests, then a short run (checks the scripts)
 	$(MAKE) --no-print-directory load-seed PROFILE=smoke
