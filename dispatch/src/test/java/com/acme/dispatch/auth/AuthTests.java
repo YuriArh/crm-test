@@ -7,6 +7,7 @@ import static com.acme.dispatch.support.DemoData.NORTH_OPERATOR;
 import static com.acme.dispatch.support.DemoData.NORTH_OPERATOR_LOGIN;
 import static com.acme.dispatch.support.DemoData.PASSWORD;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.emptyOrNullString;
@@ -27,7 +28,10 @@ import com.jayway.jsonpath.JsonPath;
 import jakarta.servlet.http.Cookie;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.security.core.context.SecurityContext;
@@ -39,6 +43,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 @IntegrationTest
+@ExtendWith(OutputCaptureExtension.class)
 class AuthTests {
 
     /** The cookie of the session (Spring Session's default name, docs/specs/jdbc-sessions.md §2.3). */
@@ -178,6 +183,42 @@ class AuthTests {
         Object principal = ((SecurityContext) context).getAuthentication().getPrincipal();
         assertThat(principal).isInstanceOfSatisfying(CurrentUser.class,
                 user -> assertThat(user.passwordHash()).isNull());
+    }
+
+    @Test
+    void unreadableSessionIsUnauthenticated(CapturedOutput output) throws Exception {
+        Cookie session = loginCookie(NORTH_INITIATOR_LOGIN);
+        jdbc.sql("""
+                        UPDATE spring_session_attributes SET attribute_bytes = :bytes
+                         WHERE session_primary_id = (SELECT primary_id FROM spring_session WHERE session_id = :id)
+                        """)
+                .param("bytes", new byte[] {0, (byte) 0xff})
+                .param("id", sessionId(session))
+                .update();
+
+        // Not a 500: the user simply signs in again, as after an expired session.
+        mockMvc.perform(get("/api/auth/me").cookie(session))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+
+        assertThat(output).contains("could not be read").doesNotContain(sessionId(session));
+        assertThat(rowsOf(session)).as("the row stays until the clean-up").isEqualTo(1);
+    }
+
+    /**
+     * Only an unreadable attribute counts as an absent session. A failure of the database must not: it would send
+     * every signed-in user to the login page although their sessions are intact (docs/specs/jdbc-sessions.md §2.6).
+     */
+    @Test
+    void databaseFailureWhileReadingASessionIsNotUnauthenticated() throws Exception {
+        Cookie session = loginCookie(NORTH_INITIATOR_LOGIN);
+        jdbc.sql("ALTER TABLE spring_session RENAME TO spring_session_away").update();
+        try {
+            assertThatThrownBy(() -> mockMvc.perform(get("/api/auth/me").cookie(session)))
+                    .rootCause().hasMessageContaining("spring_session");
+        } finally {
+            jdbc.sql("ALTER TABLE spring_session_away RENAME TO spring_session").update();
+        }
     }
 
     @Test

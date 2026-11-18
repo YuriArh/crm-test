@@ -14,6 +14,11 @@ spring:
       # Sessions live in PostgreSQL (docs/specs/jdbc-sessions.md). The tables belong to Flyway (V14), never to the
       # framework. Timeout: thirty minutes without requests, Spring Boot's default.
       initialize-schema: never
+    servlet:
+      # Not on the error page: when the session store fails (the database is down) the container forwards the error
+      # to /error, and a session filter running there would fail a second time and leave the client with the
+      # container's HTML page instead of Problem Details (docs/specs/jdbc-sessions.md §2.6).
+      filter-dispatcher-types: request,async
   mvc:
     problemdetails:
       enabled: true
