@@ -5,9 +5,22 @@ export
 .PHONY: help up down reset logs logs-carrier ps db build test run wait e2e seed contracts-lint carrier-ops inbox \
         faults fault-unavailable fault-lose-response fault-duplicate fault-delayed fault-malformed fault-off \
         dispatch-kill dispatch-start carrier-kill carrier-start db-kill db-start \
-        web-install web-dev web-build web-test web-e2e web-api-types web-api-check
+        web-install web-dev web-build web-test web-e2e web-api-types web-api-check \
+        load-up load-down load-reset load-hello load-install load-typecheck
 
 REDOCLY_IMAGE := redocly/cli:1.34.3
+
+# Load testing (NF08): k6 in Docker against a separate stack — Compose project exchange-load with its own
+# database volume and ports, the same resource limits. Inline variables override the ones exported from .env.
+K6_IMAGE := grafana/k6:2.3.0
+LOAD_PROJECT := exchange-load
+LOAD_COMPOSE := COMPOSE_PROJECT_NAME=$(LOAD_PROJECT) DB_PORT=15432 DISPATCH_PORT=18080 CARRIER_PORT=18081 \
+                WEB_PORT=13000 docker compose
+# k6 runs outside the stack's limits, in the stack's network, and hits dispatch directly (server API time).
+# Scripts (TypeScript) live in load/, results go to load/out/ (ignored by git). Usage: $(K6) run /scripts/<script>.ts
+K6 = docker run --rm --network $(LOAD_PROJECT)_default -u $$(id -u):$$(id -g) \
+       -v $(CURDIR)/load:/scripts -w /scripts \
+       -e BASE_URL=http://dispatch:8080 -e CARRIER_URL=http://carrier-emulator:8081 $(K6_IMAGE)
 
 E2E_BASE_URL ?= http://localhost:$(or $(DISPATCH_PORT),8080)
 CARRIER_BASE_URL ?= http://localhost:$(or $(CARRIER_PORT),8081)
@@ -79,6 +92,24 @@ db-kill: ## Crash PostgreSQL (SIGKILL); dispatch and carrier-emulator lose their
 db-start: ## Start PostgreSQL after db-kill and wait until dispatch and carrier-emulator are healthy again
 	docker compose start postgres
 	@$(MAKE) --no-print-directory wait
+
+load-up: ## Build and start the load-test stack (project exchange-load: own DB volume, ports 18080/18081/13000/15432)
+	$(LOAD_COMPOSE) up -d --build
+
+load-down: ## Stop the load-test stack (data is kept)
+	$(LOAD_COMPOSE) down
+
+load-reset: ## Stop the load-test stack and delete its database volume
+	$(LOAD_COMPOSE) down -v
+
+load-install: ## Install TypeScript and k6 types in load/ (pnpm via corepack; k6 itself is a Docker image)
+	cd load && corepack pnpm install --frozen-lockfile
+
+load-typecheck: ## Type-check the k6 scripts in load/ (tsc --noEmit; k6 runs the .ts files itself)
+	cd load && corepack pnpm typecheck
+
+load-hello: ## Minimal k6 script against the load-test stack (make load-up first)
+	$(K6) run /scripts/hello.ts
 
 seed: wait ## Create demo requests through the API (safe to re-run; start the stack with make up)
 	CARRIER_BASE_URL=$(CARRIER_BASE_URL) ./scripts/seed.sh $(E2E_BASE_URL)
