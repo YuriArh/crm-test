@@ -139,16 +139,16 @@ docker-compose.yml, Makefile, settings.gradle.kts, build.gradle.kts
    - Спека `docs/specs/load-test.md`, план `docs/plans/load-test-plan.md`, результат `docs/load-report.md`.
    - k6 в Docker на отдельном стенде `exchange-load`, скрипты на TypeScript в `load/`; набор создаётся через API
      (`make load-seed`), замер и отчёт — `make load-test`.
-9. **Документация:** README, устройство, модель данных, API, допущения. **Частично:** README (запуск, API,
-   эмулятор, сбои, тесты, нагрузка), `docs/dispatch-design.md`, `docs/carrier-emulator-design.md`, контракты.
-   Осталось проверить, что есть и актуальны отдельные разделы про модель данных и допущения.
+9. **Документация:** README, устройство, модель данных, API, допущения. **Реализовано** (README переписан
+   18.11.2026; подробности — `docs/dispatch-design.md`, `docs/carrier-emulator-design.md`, контракты).
 
 ## Что осталось
 
 1. Сверка с ТЗ: таблица «требование → где реализовано → чем проверено» — `docs/requirements-coverage.md`.
    Клавиатура и пустые состояния (NF06) и отсутствие секретов в журнале (NF10) закрыты тестами
    (`web/e2e/app/keyboard.spec.ts`, `TechnicalLogTests`); гейт зелёный.
-2. Документация: разделы про модель данных и допущения в README.
+2. Документация: README переписан (устройство с диаграммами, тайминги, API, модель данных, допущения, отступления
+   от ТЗ, ограничения, тестирование). Открытых пунктов по плану нет.
 
 ## Оценка времени
 

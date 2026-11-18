@@ -76,7 +76,7 @@ e2e: wait ## Run end-to-end tests against the running stack (start it with make 
 dispatch-kill: ## Crash dispatch (SIGKILL) in the middle of whatever it is doing
 	docker compose kill dispatch
 
-dispatch-start: ## Start dispatch after dispatch-kill and wait until it is healthy (sign in again: sessions are in memory)
+dispatch-start: ## Start dispatch after dispatch-kill and wait until it is healthy (sessions live in the database: no need to sign in again)
 	docker compose start dispatch
 	@$(MAKE) --no-print-directory wait
 
