@@ -5,9 +5,23 @@ export
 .PHONY: help up down reset logs logs-carrier ps db build test run wait e2e seed contracts-lint carrier-ops inbox \
         faults fault-unavailable fault-lose-response fault-duplicate fault-delayed fault-malformed fault-off \
         dispatch-kill dispatch-start carrier-kill carrier-start db-kill db-start \
-        web-install web-dev web-build web-test web-e2e web-api-types web-api-check
+        web-install web-dev web-build web-test web-e2e web-api-types web-api-check \
+        load-up load-down load-reset load-install load-typecheck load-seed load-run load-smoke load-test
 
 REDOCLY_IMAGE := redocly/cli:1.34.3
+
+# Load testing (NF08): k6 in Docker against a separate stack — Compose project exchange-load with its own
+# database volume and ports, the same resource limits. Inline variables override the ones exported from .env.
+K6_IMAGE := grafana/k6:2.3.0
+LOAD_PROJECT := exchange-load
+LOAD_COMPOSE := COMPOSE_PROJECT_NAME=$(LOAD_PROJECT) DB_PORT=15432 DISPATCH_PORT=18080 CARRIER_PORT=18081 \
+                WEB_PORT=13000 docker compose
+# k6 runs outside the stack's limits, in the stack's network, and hits dispatch directly (server API time).
+# Scripts (TypeScript) live in load/, results go to load/out/ (ignored by git). Usage: $(K6) run /scripts/<script>.ts
+K6 = docker run --rm --network $(LOAD_PROJECT)_default -u $$(id -u):$$(id -g) \
+       -v $(CURDIR)/load:/scripts -w /scripts \
+       -e BASE_URL=http://dispatch:8080 -e CARRIER_URL=http://carrier-emulator:8081 -e LOAD_PASSWORD=$(LOAD_PASSWORD) \
+       $(K6_IMAGE)
 
 E2E_BASE_URL ?= http://localhost:$(or $(DISPATCH_PORT),8080)
 CARRIER_BASE_URL ?= http://localhost:$(or $(CARRIER_PORT),8081)
@@ -79,6 +93,43 @@ db-kill: ## Crash PostgreSQL (SIGKILL); dispatch and carrier-emulator lose their
 db-start: ## Start PostgreSQL after db-kill and wait until dispatch and carrier-emulator are healthy again
 	docker compose start postgres
 	@$(MAKE) --no-print-directory wait
+
+LOAD_DISPATCH_URL := http://localhost:18080
+LOAD_CARRIER_URL := http://localhost:18081
+
+load-up: ## Build and start the load-test stack and wait until it is healthy (own DB volume, ports 18080/18081/13000/15432)
+	$(LOAD_COMPOSE) up -d --build
+	@for url in $(LOAD_DISPATCH_URL) $(LOAD_CARRIER_URL); do \
+	  ok=; for i in $$(seq 1 45); do curl -sf $$url/actuator/health >/dev/null && { ok=1; break; }; sleep 2; done; \
+	  [ -n "$$ok" ] || { echo "not healthy at $$url"; exit 1; }; \
+	done
+
+load-down: ## Stop the load-test stack (data is kept)
+	$(LOAD_COMPOSE) down
+
+load-reset: ## Stop the load-test stack and delete its database volume
+	$(LOAD_COMPOSE) down -v
+
+load-install: ## Install TypeScript and k6 types in load/ (pnpm via corepack; k6 itself is a Docker image)
+	cd load && corepack pnpm install --frozen-lockfile
+
+load-typecheck: ## Type-check the k6 scripts in load/ (tsc --noEmit; k6 runs the .ts files itself)
+	cd load && corepack pnpm typecheck
+
+load-seed: ## Create the load data set through the API on an empty load stand (PROFILE=full: 5000 requests, smoke: 200)
+	$(K6) run -e PROFILE=$(or $(PROFILE),full) -e RUN_ID=$$(date +%s) /scripts/seed.ts
+
+load-run: ## Run the load against the data set of load-seed (PROFILE=full: 20 clients, 30 s + 2 min; smoke: 2 clients, 10 s + 20 s)
+	@mkdir -p load/out
+	$(K6) run -e PROFILE=$(or $(PROFILE),full) -e RUN_ID=$(or $(RUN_ID),$$(date +%s)) \
+	  --out json=/scripts/out/requests.json --summary-export=/scripts/out/summary.json /scripts/run.ts
+
+load-test: ## The measured run and its report in load/out/report.md (PROFILE=full: NF08 profile; stop the demo stack: make down)
+	K6_IMAGE=$(K6_IMAGE) PROFILE=$(or $(PROFILE),full) ./load/load-test.sh
+
+load-smoke: ## The whole chain in a short form on a clean load stand: seed of 200 requests, then a short run (checks the scripts)
+	$(MAKE) --no-print-directory load-seed PROFILE=smoke
+	$(MAKE) --no-print-directory load-run PROFILE=smoke
 
 seed: wait ## Create demo requests through the API (safe to re-run; start the stack with make up)
 	CARRIER_BASE_URL=$(CARRIER_BASE_URL) ./scripts/seed.sh $(E2E_BASE_URL)
