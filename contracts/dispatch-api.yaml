@@ -11,8 +11,9 @@ info:
 
     ## Session and CSRF
 
-    - Sign-in creates a server session (cookie `JSESSIONID`). The session lives in memory: after a
-      restart of `dispatch` every call answers `401` and the user signs in again.
+    - Sign-in creates a server session (cookie `SESSION`). The session is kept in the database, so it
+      survives a restart of `dispatch`; it ends at sign-out or after 30 minutes without requests, and then every
+      call answers `401` and the user signs in again.
     - Every mutating call (`POST`, `PATCH`) needs the header `X-XSRF-TOKEN` with the value of the cookie
       `XSRF-TOKEN`. `GET /api/auth/csrf` sets the cookie. The token changes after login and the cookie is
       cleared on logout, so the client reads the cookie right before each mutating call.
@@ -864,7 +865,7 @@ components:
     session:
       type: apiKey
       in: cookie
-      name: JSESSIONID
+      name: SESSION
       description: Server session created by `POST /api/auth/login`.
     csrf:
       type: apiKey

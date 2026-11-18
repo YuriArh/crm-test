@@ -35,7 +35,7 @@ function fakeServer(handler: (call: Call, server: { clearCookie: () => void }) =
   const client = createApiClient({
     baseUrl: BASE,
     fetch,
-    readCookies: () => (token === undefined ? 'JSESSIONID=s' : `JSESSIONID=s; XSRF-TOKEN=${token}`),
+    readCookies: () => (token === undefined ? 'SESSION=s' : `SESSION=s; XSRF-TOKEN=${token}`),
   });
   return { client, calls, setToken: (value: string) => (token = value) };
 }
