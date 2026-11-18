@@ -6,7 +6,7 @@ export
         faults fault-unavailable fault-lose-response fault-duplicate fault-delayed fault-malformed fault-off \
         dispatch-kill dispatch-start carrier-kill carrier-start db-kill db-start \
         web-install web-dev web-build web-test web-e2e web-api-types web-api-check \
-        load-up load-down load-reset load-hello load-install load-typecheck load-seed
+        load-up load-down load-reset load-install load-typecheck load-seed load-run load-smoke
 
 REDOCLY_IMAGE := redocly/cli:1.34.3
 
@@ -20,7 +20,8 @@ LOAD_COMPOSE := COMPOSE_PROJECT_NAME=$(LOAD_PROJECT) DB_PORT=15432 DISPATCH_PORT
 # Scripts (TypeScript) live in load/, results go to load/out/ (ignored by git). Usage: $(K6) run /scripts/<script>.ts
 K6 = docker run --rm --network $(LOAD_PROJECT)_default -u $$(id -u):$$(id -g) \
        -v $(CURDIR)/load:/scripts -w /scripts \
-       -e BASE_URL=http://dispatch:8080 -e CARRIER_URL=http://carrier-emulator:8081 $(K6_IMAGE)
+       -e BASE_URL=http://dispatch:8080 -e CARRIER_URL=http://carrier-emulator:8081 -e LOAD_PASSWORD=$(LOAD_PASSWORD) \
+       $(K6_IMAGE)
 
 E2E_BASE_URL ?= http://localhost:$(or $(DISPATCH_PORT),8080)
 CARRIER_BASE_URL ?= http://localhost:$(or $(CARRIER_PORT),8081)
@@ -118,8 +119,14 @@ load-typecheck: ## Type-check the k6 scripts in load/ (tsc --noEmit; k6 runs the
 load-seed: ## Create the load data set through the API on an empty load stand (PROFILE=full: 5000 requests, smoke: 200)
 	$(K6) run -e PROFILE=$(or $(PROFILE),full) -e RUN_ID=$$(date +%s) /scripts/seed.ts
 
-load-hello: ## Minimal k6 script against the load-test stack (make load-up first)
-	$(K6) run /scripts/hello.ts
+load-run: ## Run the load against the data set of load-seed (PROFILE=full: 20 clients, 30 s + 2 min; smoke: 2 clients, 10 s + 20 s)
+	@mkdir -p load/out
+	$(K6) run -e PROFILE=$(or $(PROFILE),full) -e RUN_ID=$$(date +%s) \
+	  --out json=/scripts/out/requests.json --summary-export=/scripts/out/summary.json /scripts/run.ts
+
+load-smoke: ## The whole chain in a short form on a clean load stand: seed of 200 requests, then a short run (checks the scripts)
+	$(MAKE) --no-print-directory load-seed PROFILE=smoke
+	$(MAKE) --no-print-directory load-run PROFILE=smoke
 
 seed: wait ## Create demo requests through the API (safe to re-run; start the stack with make up)
 	CARRIER_BASE_URL=$(CARRIER_BASE_URL) ./scripts/seed.sh $(E2E_BASE_URL)
