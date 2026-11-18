@@ -9,6 +9,11 @@ spring:
       maximum-pool-size: ${DB_POOL_SIZE:10}
   flyway:
     locations: classpath:db/migration
+  session:
+    jdbc:
+      # Sessions live in PostgreSQL (docs/specs/jdbc-sessions.md). The tables belong to Flyway (V14), never to the
+      # framework. Timeout: thirty minutes without requests, Spring Boot's default.
+      initialize-schema: never
   mvc:
     problemdetails:
       enabled: true

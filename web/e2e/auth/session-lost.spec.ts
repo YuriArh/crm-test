@@ -10,7 +10,7 @@ test('after the session is lost, the next call leads to the login page', async (
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Заявки' })).toBeVisible();
 
-  await page.context().clearCookies({ name: 'JSESSIONID' });
+  await page.context().clearCookies({ name: 'SESSION' });
   const logout = page.waitForResponse('**/api/auth/logout');
   await page.getByRole('button', { name: 'Выйти' }).click();
 
@@ -23,7 +23,7 @@ test('after the session is lost, reloading a page leads to the login page with t
   await page.goto('/requests?result=REJECTED');
   await expect(page.getByRole('heading', { name: 'Заявки' })).toBeVisible();
 
-  await page.context().clearCookies({ name: 'JSESSIONID' });
+  await page.context().clearCookies({ name: 'SESSION' });
   await page.reload();
 
   await expect(page).toHaveURL(
